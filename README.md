@@ -46,13 +46,13 @@ Each flow carries a coverage state: `covered`, `partial`, or `uncovered`.
 Run it with `npx` (nothing to install):
 
 ```sh
-npx flowlens init --suite /path/to/target-repo --project my-app
+npx @jlaguna553/flowlens init --suite /path/to/target-repo --project my-app
 ```
 
 Or install it globally:
 
 ```sh
-npm install -g flowlens
+npm install -g @jlaguna553/flowlens
 flowlens init --suite /path/to/target-repo --project my-app
 ```
 
@@ -76,7 +76,7 @@ Run `init` once per project, pointing `--suite` at the target repo (or at its E2
 root):
 
 ```sh
-npx flowlens init \
+npx @jlaguna553/flowlens init \
   --suite /path/to/target-repo/e2e \
   --project my-app
 ```
@@ -116,7 +116,7 @@ directory, then for `<dataDir>/<cwd-name>/flowlens.config.json`.
 flowlens speaks MCP over stdio. Start it with:
 
 ```sh
-npx flowlens mcp --project my-app
+npx @jlaguna553/flowlens mcp --project my-app
 ```
 
 Arguments: `--project <name> | --config <path>`, `--data-dir <dir>`, `--out <dir>`,
@@ -134,7 +134,7 @@ Arguments: `--project <name> | --config <path>`, `--data-dir <dir>`, `--out <dir
       "command": [
         "npx",
         "-y",
-        "flowlens",
+        "@jlaguna553/flowlens",
         "mcp",
         "--project",
         "my-app"
@@ -153,7 +153,7 @@ Arguments: `--project <name> | --config <path>`, `--data-dir <dir>`, `--out <dir
       "command": "npx",
       "args": [
         "-y",
-        "flowlens",
+        "@jlaguna553/flowlens",
         "mcp",
         "--project",
         "my-app"
@@ -328,13 +328,13 @@ and a run JSON inside the project data dir:
 
 ```sh
 cd /path/to/target-repo/e2e
-REPORTER=$(npx -y flowlens reporter-path)
+REPORTER=$(npx -y @jlaguna553/flowlens reporter-path)
 FLOWLENS_RUN_OUTPUT=~/.flowlens/projects/my-app/out/run.json \
   npx playwright test \
   --reporter="$REPORTER" \
   --output=~/.flowlens/projects/my-app/out/test-results
 
-npx flowlens build --project my-app \
+npx @jlaguna553/flowlens build --project my-app \
   --run ~/.flowlens/projects/my-app/out/run.json
 ```
 
@@ -350,7 +350,7 @@ the flow graph without test results.
 ## Viewer
 
 ```sh
-npx flowlens serve --project my-app --port 8017
+npx @jlaguna553/flowlens serve --project my-app --port 8017
 ```
 
 Open the printed URL (the MCP `flowlens_serve` tool defaults to port `8020`; the CLI
@@ -388,7 +388,7 @@ commands without Docker.
 declared port).
 
 **MCP not loading.** Run the exact command from your config by hand
-(`npx flowlens mcp --project my-app`). If it exits immediately, check
+(`npx @jlaguna553/flowlens mcp --project my-app`). If it exits immediately, check
 Node is >= 20 and that `--project` / `--config` points at an existing
 `flowlens.config.json` under the data dir.
 

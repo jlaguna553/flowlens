@@ -2,7 +2,7 @@
 
 flowlens ships a **zero-dependency MCP server over stdio**. It speaks newline-delimited
 JSON-RPC 2.0 on stdin/stdout and exposes the flowlens build/coverage pipeline as tools an
-AI agent can call. The server is the same `src/mcp.mjs` used by `npx flowlens mcp`.
+AI agent can call. The server is the same `src/mcp.mjs` used by `npx @jlaguna553/flowlens mcp`.
 
 - Transport: stdio, newline-delimited JSON-RPC 2.0
 - Protocol version: `2024-11-05`
@@ -30,7 +30,7 @@ The server selects its project from `--project <name>` (resolved under the data 
       "command": [
         "npx",
         "-y",
-        "flowlens",
+        "@jlaguna553/flowlens",
         "mcp",
         "--project",
         "my-app"
@@ -49,7 +49,7 @@ The server selects its project from `--project <name>` (resolved under the data 
       "command": "npx",
       "args": [
         "-y",
-        "flowlens",
+        "@jlaguna553/flowlens",
         "mcp",
         "--project",
         "my-app"
@@ -66,7 +66,7 @@ The server selects its project from `--project <name>` (resolved under the data 
   "mcpServers": {
     "flowlens": {
       "command": "node",
-      "args": ["-y", "flowlens", "mcp", "--project", "my-app"]
+      "args": ["-y", "@jlaguna553/flowlens", "mcp", "--project", "my-app"]
     }
   }
 }
@@ -300,8 +300,8 @@ executed):
 ```sh
 # 0. bring up the local E2E environment (dry-run first to review)
 #    tools/call flowlens_env_up { "dryRun": true }
-npx flowlens env up --project my-app
-npx flowlens env status --project my-app
+npx @jlaguna553/flowlens env up --project my-app
+npx @jlaguna553/flowlens env status --project my-app
 
 # 1. scan (read-only) — optional, to ground flows.json
 #    tools/call flowlens_scan { "repoPath": "/path/to/repo" }
@@ -310,7 +310,7 @@ npx flowlens env status --project my-app
 #    tools/call flowlens_write_flows { "flows": { "schemaVersion": 1, ... } }
 
 # 3. build the graph from the Playwright report
-npx flowlens build --project my-app
+npx @jlaguna553/flowlens build --project my-app
 
 # 4. list uncovered/partial flows and get implementation tasks
 #    tools/call flowlens_uncovered_tasks
@@ -318,20 +318,20 @@ npx flowlens build --project my-app
 # 5. implement each suggested spec, then run Playwright with the flowlens reporter
 DATA_DIR="$HOME/.flowlens/projects/my-app"
 cd /path/to/repo/e2e
-REPORTER=$(npx -y flowlens reporter-path)
+REPORTER=$(npx -y @jlaguna553/flowlens reporter-path)
 FLOWLENS_RUN_OUTPUT="$DATA_DIR/out/run.json" \
   npx playwright test \
   --reporter="$REPORTER" \
   --output="$DATA_DIR/out/test-results"
 
 # 6. ingest the run JSON and rebuild
-npx flowlens build --project my-app --run "$DATA_DIR/out/run.json"
+npx @jlaguna553/flowlens build --project my-app --run "$DATA_DIR/out/run.json"
 
 # 7. serve the viewer
-npx flowlens serve --project my-app --port 8020
+npx @jlaguna553/flowlens serve --project my-app --port 8020
 
 # 8. tear the local environment down when done
-npx flowlens env down --project my-app
+npx @jlaguna553/flowlens env down --project my-app
 ```
 
 The reporter refuses to run unless `FLOWLENS_RUN_OUTPUT` is set; `flowlens reporter-path`
