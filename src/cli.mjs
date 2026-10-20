@@ -5,8 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { build } from './build.mjs';
 import { startServer } from './server.mjs';
-import { startMcp } from './mcp.mjs';
+import { startMcp, validateFlows } from './mcp.mjs';
 import { envUp, envDown, envStatus } from './env.mjs';
+import { mapProject, agentForAlias, resolveAgentForEnvironment } from './map.mjs';
 import { resolveConfigPath, resolveDataDir, projectDir } from './paths.mjs';
 
 const REPORTER_PATH = fileURLToPath(new URL('./reporter.mjs', import.meta.url));
@@ -22,17 +23,26 @@ host repo is stored in the flowlens tool repo.
 
 ## Loop
 
-1. Scan the target repo (read-only) to find specs, routes and controllers.
-2. Author \`flows.json\` (schemaVersion 1) and write it with \`flowlens_write_flows\`.
+1. Run \`flowlens init --suite <repo-path> --project <name>\`. init scaffolds the project and
+   launches the configured local agent to map \`flows.json\` automatically (scan specs, routes
+   and controllers; review the draft; validate it; build the graph).
+2. Review \`flows.json\`; re-map with \`flowlens map\` or edit it by hand.
 3. For every flow with coverage \`uncovered\` or \`partial\`, implement the suggested Playwright spec.
 4. Run Playwright with the flowlens reporter so results land in a run JSON.
 5. Ingest the results and rebuild the graph.
 6. Serve the viewer.
 
+\`init\` maps flows automatically unless you pass \`--no-map\` or the flows file already has
+flows. It uses the agent that installed flowlens (an opencode/claude session) or the first
+installed one, and stores it in the config. \`flowlens map\` re-runs mapping later;
+\`flowlens map --dry-run\` prints the mapping prompt without launching the agent.
+
 ## Commands
 
 \`\`\`sh
-npx flowlens-cli init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--force]
+npx flowlens-cli init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--force]
+npx flowlens-cli map [--project <name>|--config <path>] [--data-dir <dir>] [--agent opencode|claude] [--dry-run] [--timeout <ms>]
+npx flowlens-cli write-flows --file <flows.json> [--project <name>|--config <path>] [--data-dir <dir>]
 npx flowlens-cli env up --project <name> [--data-dir <dir>]
 npx flowlens-cli env status --project <name>
 npx flowlens-cli env down --project <name>
@@ -140,11 +150,42 @@ function selectionArgs(args) {
   };
 }
 
-function runInit(args) {
+function readJsonSafe(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function resolveFlowsPath(configPath) {
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  return path.resolve(path.dirname(configPath), config.flows ?? 'flows.json');
+}
+
+function resolveInitAgent(args) {
+  const requested = typeof args.agent === 'string' ? args.agent : null;
+  if (requested) {
+    const agent = agentForAlias(requested);
+    if (!agent) throw new Error(`unknown agent "${requested}"; use opencode or claude`);
+    return { ...agent, source: 'flag' };
+  }
+  return resolveAgentForEnvironment();
+}
+
+function resolveMapAgent(args) {
+  const requested = typeof args.agent === 'string' ? args.agent : null;
+  if (!requested) return undefined;
+  const agent = agentForAlias(requested);
+  if (!agent) throw new Error(`unknown agent "${requested}"; use opencode or claude`);
+  return { ...agent, source: 'flag' };
+}
+
+async function runInit(args) {
   const suiteArg = typeof args.suite === 'string' ? args.suite : null;
   if (!suiteArg) {
     process.stderr.write(
-      'usage: flowlens init --suite <path> [--project <name>] [--data-dir <dir>] [--force]\n'
+      'usage: flowlens init --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--timeout <ms>] [--force]\n'
     );
     process.exitCode = 1;
     return;
@@ -159,8 +200,17 @@ function runInit(args) {
   const configDir = path.dirname(configPath);
   fs.mkdirSync(configDir, { recursive: true });
   const force = args.force === true;
+  const chosenAgent = resolveInitAgent(args);
 
-  const config = { suite, projectName: project, flows: 'flows.json' };
+  const config = {
+    suite,
+    projectName: project,
+    flows: 'flows.json',
+    agent: {
+      command: chosenAgent.command,
+      argsTemplate: chosenAgent.argsTemplate,
+    },
+  };
   if (!force && fs.existsSync(configPath)) {
     process.stdout.write(`[flowlens] kept existing ${configPath}\n`);
   } else {
@@ -203,6 +253,138 @@ function runInit(args) {
   } else {
     process.stdout.write('[flowlens] host browser deps present\n');
   }
+
+  const flowsDoc = readJsonSafe(flowsPath);
+  const hasFlows = Array.isArray(flowsDoc && flowsDoc.flows) && flowsDoc.flows.length > 0;
+  if (args['no-map'] === true) {
+    process.stdout.write('[flowlens] mapping skipped (--no-map)\n');
+    return;
+  }
+  if (hasFlows) {
+    process.stdout.write('[flowlens] kept existing flows; run flowlens map to re-map\n');
+    return;
+  }
+  const savedConfig = readJsonSafe(configPath);
+  const savedAgent =
+    savedConfig && savedConfig.agent && typeof savedConfig.agent === 'object'
+      ? savedConfig.agent
+      : null;
+  const mapCommand = savedAgent && savedAgent.command ? savedAgent.command : chosenAgent.command;
+  process.stdout.write(`[flowlens] mapping flows with ${mapCommand}...\n`);
+  try {
+    const mapped = await mapProject({
+      configPath,
+      timeoutMs: typeof args.timeout === 'string' ? Number(args.timeout) : undefined,
+      onLog: (line) => process.stdout.write(`[agent] ${line}\n`),
+    });
+    if (mapped.ok && (mapped.flowsAfter ?? 0) > 0) {
+      const stats = mapped.build?.stats ?? {};
+      process.stdout.write(
+        `[flowlens] mapped ${stats.flows ?? 0} flow(s), ${stats.nodes ?? 0} node(s), ${stats.links ?? 0} link(s) -> ${mapped.flowsPath}\n`
+      );
+      if (mapped.build?.graphPath) {
+        process.stdout.write(`[flowlens] build -> ${mapped.build.graphPath}\n`);
+      }
+    } else {
+      process.stderr.write(
+        `[flowlens] WARNING: automatic mapping did not finish cleanly (${mapped.error ?? 'no flows produced'}); flows left at ${flowsPath}. Retry with: flowlens map --config ${configPath}\n`
+      );
+    }
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    process.stderr.write(
+      `[flowlens] WARNING: automatic mapping failed: ${message}. Retry with: flowlens map --config ${configPath}\n`
+    );
+  }
+}
+
+async function runMap(args) {
+  const dryRun = args['dry-run'] === true || args.dryRun === true;
+  const timeoutMs = typeof args.timeout === 'string' ? Number(args.timeout) : undefined;
+  let agent;
+  try {
+    agent = resolveMapAgent(args);
+  } catch (error) {
+    process.stderr.write(`[flowlens] error: ${error && error.message ? error.message : error}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const result = await mapProject({
+      ...selectionArgs(args),
+      agent,
+      dryRun,
+      timeoutMs,
+      outDir: typeof args.out === 'string' ? args.out : undefined,
+      onLog: (line) => process.stdout.write(`[agent] ${line}\n`),
+    });
+    if (dryRun) {
+      process.stdout.write(`${result.prompt}\n`);
+      process.stderr.write(
+        `[flowlens] dry-run: agent ${result.agent.command} ${JSON.stringify(result.agent.argsTemplate)}\n`
+      );
+      return;
+    }
+    if (result.ok && (result.flowsAfter ?? 0) > 0) {
+      const stats = result.build?.stats ?? {};
+      process.stdout.write(
+        `[flowlens] mapped ${stats.flows ?? 0} flow(s), ${stats.nodes ?? 0} node(s), ${stats.links ?? 0} link(s) -> ${result.flowsPath} (${result.durationMs}ms)\n`
+      );
+    } else if (result.ok) {
+      process.stderr.write(
+        `[flowlens] WARNING: agent finished but produced no flows (${result.flowsPath})\n`
+      );
+      process.exitCode = 1;
+    } else {
+      process.stderr.write(
+        `[flowlens] mapping failed: ${result.error ?? `agent exited with code ${result.exitCode}`}\n`
+      );
+      process.exitCode = 1;
+    }
+  } catch (error) {
+    process.stderr.write(`[flowlens] error: ${error && error.message ? error.message : error}\n`);
+    process.exitCode = 1;
+  }
+}
+
+function runWriteFlows(args) {
+  const file = typeof args.file === 'string' ? path.resolve(args.file) : null;
+  if (!file) {
+    process.stderr.write(
+      'usage: flowlens write-flows --file <flows.json> [--project <name>|--config <path>] [--data-dir <dir>]\n'
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const configPath = resolveConfigPath(selectionArgs(args));
+  if (!fs.existsSync(configPath)) {
+    process.stderr.write(`[flowlens] error: config not found: ${configPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, path: null, errors: [`cannot read ${file}: ${message}`] }, null, 2)}\n`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const flowsPath = resolveFlowsPath(configPath);
+  const errors = validateFlows(doc);
+  if (errors.length) {
+    process.stdout.write(`${JSON.stringify({ ok: false, path: flowsPath, errors }, null, 2)}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  fs.mkdirSync(path.dirname(flowsPath), { recursive: true });
+  fs.writeFileSync(flowsPath, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
+  process.stdout.write(
+    `${JSON.stringify({ ok: true, path: flowsPath, errors: [], flows: doc.flows.length }, null, 2)}\n`
+  );
 }
 
 function runBuild(args) {
@@ -279,7 +461,9 @@ async function runEnv(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
-  if (command === 'init') runInit(args);
+  if (command === 'init') await runInit(args);
+  else if (command === 'map') await runMap(args);
+  else if (command === 'write-flows') runWriteFlows(args);
   else if (command === 'build') runBuild(args);
   else if (command === 'serve') await runServe(args);
   else if (command === 'mcp') await runMcp(args);
@@ -287,8 +471,10 @@ async function main() {
   else if (command === 'reporter-path') process.stdout.write(`${REPORTER_PATH}\n`);
   else {
     process.stderr.write(
-      'usage: flowlens <init|build|serve|mcp|env|reporter-path>\n' +
-        '  init  --suite <path> [--project <name>] [--data-dir <dir>] [--force]\n' +
+      'usage: flowlens <init|map|write-flows|build|serve|mcp|env|reporter-path>\n' +
+        '  init  --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--timeout <ms>] [--force]\n' +
+        '  map   [--project <name>|--config <path>] [--data-dir <dir>] [--agent opencode|claude] [--dry-run] [--timeout <ms>]\n' +
+        '  write-flows --file <flows.json> [--project <name>|--config <path>] [--data-dir <dir>]\n' +
         '  build [--project <name>|--config <path>] [--data-dir <dir>] [--run <path>] [--report <dir>] [--out <dir>]\n' +
         '  serve [--project <name>|--config <path>] [--data-dir <dir>] [--out <dir>] [--port <n>]\n' +
         '  mcp   [--project <name>|--config <path>] [--data-dir <dir>] [--out <dir>] [--port <n>]\n' +

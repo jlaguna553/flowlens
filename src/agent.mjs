@@ -171,7 +171,7 @@ export function buildImplementPrompt(task, agentInfo = {}) {
   return lines.join('\n');
 }
 
-function shellQuote(value) {
+export function shellQuote(value) {
   const text = String(value ?? '');
   if (text === '') return "''";
   if (SAFE_SHELL_ARG.test(text)) return text;

@@ -9,21 +9,25 @@ flowlens is generic: it stores no data about the repo it runs against. All proje
 
 ## Loop
 
-1. Scan the target repo (read-only) to find specs, routes and controllers.
-2. Ask `flowlens_scaffold_flows` for a draft `flows.json` (one covered flow per Playwright
-   `describe`, plus uncovered route candidates); review and edit it by hand.
-3. Write the reviewed document with `flowlens_write_flows` (validates schemaVersion 1).
-4. Bring up the local test env (`flowlens_env_up`, dry-run first) if the flows need one.
-5. For every flow with coverage `uncovered` or `partial`, implement the suggested Playwright
+1. Run `flowlens init --suite <repo-path> --project <name>`. It scaffolds the project and
+   launches the configured local agent to map `flows.json` automatically: scan specs,
+   routes and controllers, validate the draft, persist it and build the graph. The agent
+   that installed flowlens (opencode/claude session) is detected and stored in the config.
+2. Review `flows.json`; re-map with `flowlens map` or edit it by hand (MCP:
+   `flowlens_scaffold_flows` + `flowlens_write_flows`).
+3. Bring up the local test env (`flowlens_env_up`, dry-run first) if the flows need one.
+4. For every flow with coverage `uncovered` or `partial`, implement the suggested Playwright
    spec (`flowlens_uncovered_tasks`, then `flowlens_implement_test` to launch the agent).
-6. Run Playwright with the flowlens reporter so results land in a run JSON.
-7. Ingest the results (`flowlens_ingest_results`) and rebuild the graph (`flowlens_build`).
-8. Serve the viewer (`flowlens_serve`).
+5. Run Playwright with the flowlens reporter so results land in a run JSON.
+6. Ingest the results (`flowlens_ingest_results`) and rebuild the graph (`flowlens_build`).
+7. Serve the viewer (`flowlens_serve`).
 
 ## Commands
 
 ```sh
-npx flowlens-cli init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--force]
+npx flowlens-cli init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--timeout <ms>] [--force]
+npx flowlens-cli map [--project <name>|--config <path>] [--data-dir <dir>] [--agent opencode|claude] [--dry-run] [--timeout <ms>]
+npx flowlens-cli write-flows --file <flows.json> [--project <name>|--config <path>] [--data-dir <dir>]
 npx flowlens-cli env up --project <name> [--data-dir <dir>] [--dry-run]
 npx flowlens-cli env status --project <name>
 npx flowlens-cli env down --project <name>
@@ -35,6 +39,12 @@ npx flowlens-cli mcp --project <name>
 
 Any command also accepts `--config <path>` instead of `--project`, and `--data-dir <dir>`
 (or `FLOWLENS_DATA_DIR`).
+
+`init` maps flows automatically unless `--no-map` is passed or `flows.json` already contains
+flows. The agent is chosen from `--agent`, then from the session that launched flowlens
+(opencode/claude), then from the installed binaries, and is stored in the config.
+`flowlens map --dry-run` prints the mapping prompt without launching the agent;
+`flowlens write-flows` validates a draft against schemaVersion 1 and persists it.
 
 ## MCP tools
 

@@ -351,7 +351,7 @@ function scanRepo(repoPath) {
   return result;
 }
 
-function validateFlows(doc) {
+export function validateFlows(doc) {
   const errors = [];
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
     errors.push('flows document must be an object');

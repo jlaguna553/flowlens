@@ -125,7 +125,47 @@ of it shows up in your commits:
 | `--suite <path>` | **Required.** Target repo or its E2E suite root. |
 | `--project <name>` | Project name. Defaults to the suite directory name. |
 | `--data-dir <dir>` | Data dir. Defaults to `~/.flowlens/projects` or `FLOWLENS_DATA_DIR`. |
+| `--agent opencode\|claude` | Agent used to map flows. Defaults to the agent that launched `init` (opencode/claude session), else the first installed one. |
+| `--no-map` | Skip the automatic flow mapping. |
+| `--timeout <ms>` | Kill the mapping agent after this many milliseconds. |
 | `--force` | Overwrite an existing config / flows / AGENTS skeleton. |
+
+### Automatic flow mapping
+
+`init` does not stop at an empty `flows.json`: it scans the project and **launches your
+local agent to map the flows automatically**. The agent reads the repo (Playwright specs,
+frontend routes, backend controllers), writes a draft, and flowlens validates it, persists
+`flows.json`, and rebuilds the graph. The whole mapping stays outside the target repo.
+
+The agent is chosen in this order:
+
+1. `--agent opencode|claude`, if given.
+2. The agent that launched the command, detected from its environment (`opencode` or
+   `claude` session markers). This is what makes `init` use "the agent you installed
+   flowlens with".
+3. The first installed agent (`opencode`, then `claude`); default `opencode`.
+
+The chosen agent is stored in `flowlens.config.json`, so later `map` / `implement-test`
+runs reuse it. If the agent is not installed or fails, `init` still succeeds, keeps the
+scaffolded files, and prints a warning with the exact `flowlens map` command to retry.
+Mapping is also skipped when `flows.json` already contains flows.
+
+Re-map at any time:
+
+```sh
+# print the prompt without launching the agent
+npx flowlens-cli map --project my-app --dry-run
+
+# launch the configured agent again
+npx flowlens-cli map --project my-app
+
+# use a specific agent for this run
+npx flowlens-cli map --project my-app --agent claude
+```
+
+Agents that do not use the MCP server can validate a draft themselves with
+`flowlens write-flows --file <draft.json> --config <config>`; it returns
+`{ ok, path, errors }` and writes only when the document matches `schemaVersion` 1.
 
 At the end, `init` checks for host browser libs and prints a warning if `libnspr4` /
 `libnss3` are missing (see Troubleshooting).
@@ -218,6 +258,10 @@ Give the agent the prompt, let it call the tools. The three capabilities below a
 whole loop.
 
 ### 1. Map the flows
+
+`init` already does this automatically with the configured agent (see
+[Automatic flow mapping](#automatic-flow-mapping)). Use `flowlens map` to re-map later, or
+the manual loop below when you want the agent to show you the draft before writing it.
 
 > Scan the repo at `/path/to/target-repo`. Draft a `flows.json` of user flows from it, show
 > me the draft for review, then write it. After writing, build the graph and start the
@@ -419,6 +463,12 @@ Node is >= 20 and that `--project` / `--config` points at an existing
 `{ "command": "claude", "argsTemplate": ["-p", "{{prompt}}"] }`. Put the block in
 `flowlens.config.json` or `agent.json`. The array form avoids the shell; use the string
 form only when you need a shell pipeline.
+
+**Automatic mapping failed.** `init` maps flows with the configured agent. If the agent is
+missing or the run fails, `init` keeps the scaffolded files and prints a warning. Retry with
+`flowlens map --project my-app` (add `--dry-run` to see the prompt first, `--agent claude`
+to switch agents). Use `init --no-map` to skip mapping entirely; `init` also skips it when
+`flows.json` already has flows.
 
 ## Privacy
 

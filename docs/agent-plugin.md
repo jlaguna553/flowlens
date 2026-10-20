@@ -65,7 +65,7 @@ The server selects its project from `--project <name>` (resolved under the data 
 {
   "mcpServers": {
     "flowlens": {
-      "command": "node",
+      "command": "npx",
       "args": ["-y", "flowlens-cli", "mcp", "--project", "my-app"]
     }
   }
@@ -76,6 +76,36 @@ When neither `--project` nor `--config` is given the server looks for
 `flowlens.config.json` in the current directory, then for `<dataDir>/<cwd-name>/flowlens.config.json`.
 `--data-dir <dir>` overrides the data dir. `--out <dir>` and `--port <n>` set the defaults
 used by the tools.
+
+## Automatic mapping on init
+
+`flowlens init` maps the project before it returns. It scaffolds the project data, scans the
+repo (read-only) and **launches the configured local agent** to author `flows.json`. The
+agent writes a draft; flowlens validates it against `schemaVersion` 1, persists it into the
+data dir, and rebuilds the graph. Nothing is written inside the target repo.
+
+Agent selection order:
+
+1. `--agent opencode|claude`.
+2. The agent session that launched `init` (detected from `opencode` / `claude` environment
+   markers), so the agent that installed flowlens is the one that maps the flows.
+3. The first installed agent (`opencode`, then `claude`); default `opencode`.
+
+The chosen agent is stored in `flowlens.config.json` and reused by `map` and
+`implement-test`.
+
+```sh
+npx flowlens-cli init --suite /path/to/repo/e2e --project my-app
+npx flowlens-cli init --suite /path/to/repo/e2e --project my-app --no-map
+npx flowlens-cli map --project my-app                 # re-map with the configured agent
+npx flowlens-cli map --project my-app --dry-run       # print the prompt only
+npx flowlens-cli map --project my-app --agent claude  # override the agent for this run
+npx flowlens-cli write-flows --file draft.json --config <config>  # validate + persist a draft
+```
+
+Mapping is skipped with `--no-map` or when `flows.json` already has flows. If the agent is
+missing or fails, `init` still succeeds with the scaffolded files and warns; retry with
+`flowlens map`.
 
 ## Tools
 
@@ -303,10 +333,14 @@ executed):
 npx flowlens-cli env up --project my-app
 npx flowlens-cli env status --project my-app
 
-# 1. scan (read-only) — optional, to ground flows.json
-#    tools/call flowlens_scan { "repoPath": "/path/to/repo" }
+# 1. init already scans and maps flows with the configured agent
+#    (init also builds the graph; see "Automatic mapping on init")
+npx flowlens-cli init --suite /path/to/repo/e2e --project my-app
 
-# 2. author + write flows.json
+# 2. re-map or review the draft when needed
+#    flowlens map --project my-app --dry-run
+#    tools/call flowlens_scan { "repoPath": "/path/to/repo" }
+#    tools/call flowlens_scaffold_flows { "repoPath": "/path/to/repo" }
 #    tools/call flowlens_write_flows { "flows": { "schemaVersion": 1, ... } }
 
 # 3. build the graph from the Playwright report
