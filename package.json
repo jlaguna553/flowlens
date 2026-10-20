@@ -1,0 +1,44 @@
+{
+  "name": "flowlens",
+  "version": "0.1.0",
+  "description": "Map user flows to E2E coverage with embedded Playwright video/trace evidence and an MCP plugin for local AI agents.",
+  "type": "module",
+  "bin": {
+    "flowlens": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "docs/agent-plugin.md",
+    "AGENTS.md",
+    "examples/demo/README.md",
+    "examples/demo/flowlens.config.json",
+    "examples/demo/flows.json"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:viewer": "node scripts/build-viewer.mjs",
+    "prepublishOnly": "npm run build:viewer"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "coverage",
+    "flows",
+    "mcp",
+    "testing",
+    "trace-viewer",
+    "ai-agents"
+  ],
+  "author": "Javier Laguna",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jlaguna553/flowlens.git"
+  },
+  "homepage": "https://github.com/jlaguna553/flowlens#readme",
+  "bugs": {
+    "url": "https://github.com/jlaguna553/flowlens/issues"
+  }
+}

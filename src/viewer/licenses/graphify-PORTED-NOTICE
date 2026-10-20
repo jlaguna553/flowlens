@@ -1,0 +1,23 @@
+FlowLens viewer — src/viewer/render.ts (source) and
+src/viewer/render.mjs (generated plain-JavaScript build shipped at runtime)
+
+Ported and MODIFIED from Graphify's graphify/exporters/html.py
+(Graphify-Labs/graphify, version 0.9.91).
+
+Graphify is licensed under the Apache License, Version 2.0 (see
+graphify-LICENSE); portions contributed before relicensing remain
+available under the MIT License (see graphify-LICENSE-MIT and
+graphify-NOTICE).
+
+The ported template was MODIFIED for FlowLens: the legend was remapped
+from communities to flows, the sidebar info panel now renders
+interaction/decision nodes with coverage, search was rebuilt without
+inline handlers, and a timeline API stub (window.flowlensViewer:
+selectNode / highlightNode / onTime / setTrack) plus an afterDrawing
+overlay hook were added. Modified files are marked here per Apache-2.0
+Section 4(b).
+
+The bundled vis-network v10.1.2 (src/viewer/vendor/vis-network.min.js,
+sha256 fc674cfa6cceb27a3b40ff4ea75c204a2d8570fb39b9a627127cf7039e141ad4)
+is licensed under Apache-2.0 and MIT (see
+vis-network-LICENSE-APACHE-2.0 and vis-network-LICENSE-MIT).

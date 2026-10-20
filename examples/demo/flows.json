@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "project": "demo",
+  "suite": {
+    "root": ".",
+    "projectName": "chromium"
+  },
+  "flows": [
+    {
+      "id": "F1",
+      "title": "Create an item",
+      "coverage": "uncovered",
+      "actors": [
+        "member"
+      ],
+      "nodes": [
+        {
+          "id": "F1.form",
+          "kind": "interaction",
+          "label": "Fill the item form"
+        },
+        {
+          "id": "F1.save",
+          "kind": "backend",
+          "label": "POST /items"
+        },
+        {
+          "id": "F1.confirm",
+          "kind": "decision",
+          "label": "Success response"
+        }
+      ],
+      "edges": [
+        [
+          "F1.form",
+          "F1.save"
+        ],
+        [
+          "F1.save",
+          "F1.confirm"
+        ]
+      ],
+      "tests": [
+        {
+          "spec": "items.spec.ts",
+          "title": "creates an item"
+        }
+      ]
+    }
+  ],
+  "moduleEdges": []
+}

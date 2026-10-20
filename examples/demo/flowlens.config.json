@@ -1,0 +1,9 @@
+{
+  "suite": ".",
+  "projectName": "demo",
+  "flows": "flows.json",
+  "agent": {
+    "command": "opencode",
+    "argsTemplate": ["run", "{{prompt}}"]
+  }
+}
