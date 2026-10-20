@@ -2008,7 +2008,7 @@ function startImplementRun(flowId) {
   }).catch(function (error) {
     state.status = 'error';
     const message = error && error.message ? error.message : String(error);
-    state.log = (state.log ? state.log + '\n' : '') + '[flowlens] ' + message;
+    state.log = (state.log ? state.log + '\\n' : '') + '[flowlens] ' + message;
     updateImplementView(flowId);
   });
 }
