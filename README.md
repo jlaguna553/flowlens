@@ -56,6 +56,29 @@ npm install -g flowlens-cli
 flowlens init --suite /path/to/target-repo --project my-app
 ```
 
+### Install straight from GitHub (no npm registry needed)
+
+The repository is self-contained, so you can run it without publishing to npm:
+
+```sh
+npx -y github:jlaguna553/flowlens init --suite /path/to/target-repo --project my-app
+```
+
+Or install it globally from the repository:
+
+```sh
+npm install -g github:jlaguna553/flowlens
+flowlens init --suite /path/to/target-repo --project my-app
+```
+
+MCP clients can use the same spec:
+
+```json
+"command": ["npx", "-y", "github:jlaguna553/flowlens", "mcp", "--project", "my-app"]
+```
+
+The CLI binary is always `flowlens`, regardless of how the package was installed.
+
 There are no runtime dependencies. It's plain Node with a single `package.json` and the
 `src/` tree. Node.js >= 20 is required.
 
