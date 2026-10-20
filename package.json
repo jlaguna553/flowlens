@@ -1,5 +1,5 @@
 {
-  "name": "@jlaguna553/flowlens",
+  "name": "flowlens-cli",
   "version": "0.1.0",
   "description": "Map user flows to E2E coverage with embedded Playwright video/trace evidence and an MCP plugin for local AI agents.",
   "type": "module",

@@ -14,7 +14,7 @@ const REPORTER_PATH = fileURLToPath(new URL('./reporter.mjs', import.meta.url));
 const AGENTS_MD = `# flowlens - agent workflow
 
 flowlens maps user flows to E2E coverage and embeds Playwright video/trace evidence.
-Agents drive it through the MCP server (\`npx @jlaguna553/flowlens mcp\`) or the CLI.
+Agents drive it through the MCP server (\`npx flowlens-cli mcp\`) or the CLI.
 
 All project data (config, flows, labels, env, out, env) lives outside this repo, under
 \`<dataDir>/<project>/\` (default dataDir \`~/.flowlens/projects\`), so nothing about the
@@ -32,15 +32,15 @@ host repo is stored in the flowlens tool repo.
 ## Commands
 
 \`\`\`sh
-npx @jlaguna553/flowlens init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--force]
-npx @jlaguna553/flowlens env up --project <name> [--data-dir <dir>]
-npx @jlaguna553/flowlens env status --project <name>
-npx @jlaguna553/flowlens env down --project <name>
-npx @jlaguna553/flowlens build --project <name>
-npx @jlaguna553/flowlens build --config <dataDir>/<project>/flowlens.config.json [--run <path>] [--out <dir>]
-npx @jlaguna553/flowlens serve --project <name> [--port 8020]
-npx @jlaguna553/flowlens mcp --project <name>
-npx @jlaguna553/flowlens reporter-path
+npx flowlens-cli init --suite <repo-path> [--project <name>] [--data-dir <dir>] [--force]
+npx flowlens-cli env up --project <name> [--data-dir <dir>]
+npx flowlens-cli env status --project <name>
+npx flowlens-cli env down --project <name>
+npx flowlens-cli build --project <name>
+npx flowlens-cli build --config <dataDir>/<project>/flowlens.config.json [--run <path>] [--out <dir>]
+npx flowlens-cli serve --project <name> [--port 8020]
+npx flowlens-cli mcp --project <name>
+npx flowlens-cli reporter-path
 \`\`\`
 
 Any command also accepts \`--config <path>\` to point at an explicit config file instead of
