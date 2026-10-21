@@ -156,6 +156,11 @@ export function buildImplementPrompt(task, agentInfo = {}) {
     lines.push('- (no nodes listed; cover the whole flow)');
   }
   lines.push('');
+  lines.push(
+    'Prerequisite: @playwright/test must be installed in the suite. If it is missing, run ' +
+      '`npm install -D @playwright/test` and `npx playwright install chromium` before running the spec.'
+  );
+  lines.push('');
   lines.push('Steps:');
   lines.push(`1. Create or update the spec at ${specPath} (relative ${specRel}).`);
   lines.push('2. Drive the UI/API through every node above and assert the expected outcome.');
@@ -196,6 +201,44 @@ export function buildAgentInvocation(agent = {}, prompt = '') {
   return { command, args, shell: false };
 }
 
+function truncate(text, max = 160) {
+  const value = String(text ?? '');
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function describeInvocation(invocation, prompt) {
+  const marker = `<prompt: ${String(prompt ?? '').length} chars>`;
+  if (invocation.shellCommand) {
+    return truncate(invocation.shellCommand.split(shellQuote(prompt)).join(marker), 600);
+  }
+  const args = (invocation.args ?? []).map((arg) =>
+    String(arg) === String(prompt) ? marker : truncate(arg, 160)
+  );
+  return truncate([invocation.command, ...args].join(' '), 600);
+}
+
+function agentCommandExists(command) {
+  if (typeof command !== 'string' || !command) return false;
+  if (command.includes('/')) {
+    try {
+      fs.accessSync(command, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const dirs = String(process.env.PATH ?? '').split(path.delimiter);
+  return dirs.some((dir) => {
+    if (!dir) return false;
+    try {
+      fs.accessSync(path.join(dir, command), fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function streamLines(stream, emit) {
   if (!stream) return;
   let buffer = '';
@@ -230,10 +273,13 @@ export function runAgent(options = {}) {
       }
     }
   };
+  const prompt = options.prompt ?? '';
   const invocation = buildAgentInvocation(
     { command: options.command, argsTemplate: options.args },
-    options.prompt ?? ''
+    prompt
   );
+  const cwd = options.cwd ?? process.cwd();
+  const commandSummary = describeInvocation(invocation, prompt);
   const env =
     options.env && typeof options.env === 'object' ? { ...process.env, ...options.env } : process.env;
   return new Promise((resolve) => {
@@ -246,20 +292,21 @@ export function runAgent(options = {}) {
       resolve(result);
     };
     let child;
+    emit(`[flowlens] agent command: ${commandSummary}`);
+    emit(`[flowlens] agent cwd: ${cwd}`);
     try {
       child = spawn(invocation.command, invocation.args, {
-        cwd: options.cwd,
+        cwd,
         env,
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
-      emit(`[flowlens] failed to spawn agent: ${message}`);
+      emit(`[flowlens] failed to spawn agent: ${message} (command: ${commandSummary}, cwd: ${cwd})`);
       finish({ code: 1, log, durationMs: Date.now() - started, error: message });
       return;
     }
-    if (invocation.shellCommand) emit(`[flowlens] agent command: ${invocation.shellCommand}`);
     const timeoutMs = Number(options.timeoutMs);
     if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
       timer = setTimeout(() => {
@@ -275,7 +322,7 @@ export function runAgent(options = {}) {
     streamLines(child.stderr, emit);
     child.on('error', (error) => {
       const message = error && error.message ? error.message : String(error);
-      emit(`[flowlens] agent error: ${message}`);
+      emit(`[flowlens] agent error: ${message} (command: ${commandSummary}, cwd: ${cwd})`);
       finish({ code: 1, log, durationMs: Date.now() - started, error: message });
     });
     child.on('close', (code) => {
@@ -337,6 +384,27 @@ export function startImplementRun(options = {}) {
     }
   };
   emit(`[flowlens] implementing flow ${flowId} with ${project.agent.command}`);
+  const problems = [];
+  if (!agentCommandExists(project.agent.command)) {
+    problems.push(`agent command not found: ${project.agent.command}`);
+  }
+  try {
+    if (!fs.statSync(project.suite).isDirectory()) {
+      problems.push(`suite is not a directory: ${project.suite}`);
+    }
+  } catch {
+    problems.push(`suite directory not found: ${project.suite}`);
+  }
+  if (problems.length) {
+    for (const problem of problems) emit(`[flowlens] ${problem}`);
+    run.error = problems.join('; ');
+    run.ok = false;
+    run.exitCode = 1;
+    run.durationMs = Date.now() - Date.parse(run.startedAt);
+    run.status = 'done';
+    run.finishedAt = new Date().toISOString();
+    return run;
+  }
   runAgent({
     command: project.agent.command,
     args: project.agent.argsTemplate,
@@ -351,7 +419,7 @@ export function startImplementRun(options = {}) {
     run.ok = result.code === 0;
     if (typeof options.rebuild === 'function') {
       try {
-        const rebuilt = options.rebuild();
+        const rebuilt = options.rebuild(run);
         run.rebuilt = true;
         if (rebuilt && rebuilt.graphPath) run.graphPath = rebuilt.graphPath;
         if (rebuilt && rebuilt.graph && rebuilt.graph.stats) run.stats = rebuilt.graph.stats;

@@ -591,7 +591,15 @@ function toolImplementTest(options, args) {
     project: { suite: ctx.suite, agent, project: ctx.project },
     graph,
     flowId,
-    rebuild: () => build({ configPath: ctx.configPath, outDir: options.outDir }),
+    rebuild: (implementedRun) => {
+      const runPath =
+        implementedRun && implementedRun.task ? implementedRun.task.outputPath : null;
+      return build({
+        configPath: ctx.configPath,
+        outDir: options.outDir,
+        ...(runPath && fs.existsSync(runPath) ? { runPath } : {}),
+      });
+    },
   });
   return {
     id: run.id,

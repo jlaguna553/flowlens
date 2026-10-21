@@ -278,7 +278,14 @@ export function createServer(options = {}) {
             graph,
             flowId,
             timeoutMs: options.agentTimeoutMs,
-            rebuild: () => build({ configPath }),
+            rebuild: (implementedRun) => {
+              const runPath =
+                implementedRun && implementedRun.task ? implementedRun.task.outputPath : null;
+              return build({
+                configPath,
+                ...(runPath && fs.existsSync(runPath) ? { runPath } : {}),
+              });
+            },
           });
         } catch (error) {
           sendJson(res, 500, { error: error && error.message ? error.message : String(error) });
