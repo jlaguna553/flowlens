@@ -634,7 +634,12 @@ function styles(): string {
   #play-speed { flex: 0 0 auto; background: var(--bg); color: var(--text); border: 1px solid var(--input-border); border-radius: 6px; padding: 3px 6px; font-size: 11px; cursor: pointer; outline: none; }
   #evidence-panel { border-top: 1px solid var(--border); display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #evidence-panel h3 { font-size: 13px; color: var(--text-2); padding: 12px 14px 0; text-transform: uppercase; letter-spacing: 0.05em; }
-  #evidence-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  #evidence-tabs-row { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+  #evidence-tabs { display: flex; gap: 4px; flex: 1 1 auto; min-width: 0; }
+  .ev-float-btn { flex: 0 0 auto; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 5px 8px; font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
+  .ev-float-btn:hover { color: var(--text); border-color: #4E79A7; }
+  .ev-float-btn:focus-visible { outline: 2px solid #4E79A7; outline-offset: 2px; }
+  .ev-float-btn[hidden] { display: none; }
   .ev-tab { flex: 1; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 5px 0; font-size: 11px; cursor: pointer; }
   .ev-tab:hover { color: var(--text); }
   .ev-tab[aria-pressed="true"] { background: #4E79A7; border-color: #4E79A7; color: #fff; }
@@ -671,6 +676,26 @@ function styles(): string {
   .ev-run-status[data-state="running"] { color: #EDC948; }
   .ev-run-status[data-state="done"] { color: #59A14F; }
   .ev-run-log { margin: 0; padding: 8px; max-height: 220px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .ev-float-placeholder { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 14px; font-size: 12px; color: var(--muted); font-style: italic; }
+  .ev-float-placeholder[hidden] { display: none; }
+  .ev-float-dock { flex: 0 0 auto; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-style: normal; }
+  .ev-float-dock:hover { color: var(--text); border-color: #4E79A7; }
+  #float-layer { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
+  .float-window { position: fixed; display: flex; flex-direction: column; min-width: 360px; min-height: 320px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25); overflow: hidden; resize: both; pointer-events: auto; }
+  .float-window.maximized { left: 8px !important; top: 8px !important; width: calc(100vw - 16px) !important; height: calc(100vh - 16px) !important; resize: none; border-radius: 8px; }
+  .float-titlebar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--bg); border-bottom: 1px solid var(--border); cursor: move; user-select: none; touch-action: none; }
+  .float-window.maximized .float-titlebar { cursor: default; }
+  .float-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+  .float-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+  .float-action { height: 24px; padding: 0 8px; background: var(--panel); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; font-size: 11px; line-height: 1; cursor: pointer; }
+  .float-action:hover { color: var(--text); border-color: #4E79A7; }
+  .float-action:focus-visible { outline: 2px solid #4E79A7; outline-offset: 1px; }
+  .float-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .float-content #evidence-tabs-row { flex: 0 0 auto; }
+  .float-content #evidence-body { flex: 1 1 auto; min-height: 0; }
+  .float-window #evidence-body.ev-body-trace, .float-window #evidence-body.ev-body-video { overflow: hidden; }
+  .float-window .ev-trace { flex: 1 1 auto; height: auto; min-height: 0; }
+  .float-window .ev-run-log { max-height: 45vh; }
 </style>`;
 }
 
@@ -1684,11 +1709,22 @@ window.flowlensViewer = {
 };
 
 const evidenceBody = document.getElementById('evidence-body');
+const evidenceTabsRow = document.getElementById('evidence-tabs-row');
+const evidencePanelEl = document.getElementById('evidence-panel');
+const evidencePlaceholderEl = document.getElementById('evidence-placeholder');
+const evidenceFloatBtn = document.getElementById('evidence-float-btn');
+const evidenceDockBtn = document.getElementById('evidence-dock-btn');
+const floatLayerEl = document.getElementById('float-layer');
 const evTabButtons = Array.prototype.slice.call(document.querySelectorAll('[data-ev-tab]'));
 const implementTabBtn = document.querySelectorAll('[data-ev-tab="implement"]')[0] || null;
 const evidenceState = { flowId: null, testIndex: 0, tab: 'video', videoBaseMs: 0, track: [], appliedKey: null };
 let evVideo = null;
 let evTraceFrame = null;
+let floatWindow = null;
+let floatMaximized = false;
+let floatRestoreRect = null;
+let floatDrag = null;
+let floatResizeObserver = null;
 
 function flowNeedsTest(flow) {
   return !!flow && (flow.coverage === 'partial' || flow.coverage === 'uncovered');
@@ -1718,6 +1754,7 @@ function setEvidenceFlow(flowId) {
   if (changed) { evidenceState.testIndex = 0; evidenceState.appliedKey = null; }
   const flow = currentEvidenceFlow();
   updateImplementTab();
+  updateFloatTitle();
   if (changed) {
     applyCurrentTest();
     const autoImplement = flowNeedsTest(flow) && (!flow.tests || !flow.tests.length);
@@ -2305,10 +2342,282 @@ function setEvidenceTab(tab) {
     b.setAttribute('aria-pressed', String(b.getAttribute('data-ev-tab') === tab));
   });
   renderEvidenceBody();
+  updateFloatTitle();
 }
 
 evTabButtons.forEach(function (b) {
   b.addEventListener('click', function () { setEvidenceTab(b.getAttribute('data-ev-tab')); });
+});
+
+const FLOAT_KEY = 'flowlens-evidence-float';
+
+function readFloatState() {
+  try {
+    const raw = localStorage.getItem(FLOAT_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeFloatState(rect, maximized) {
+  try {
+    localStorage.setItem(FLOAT_KEY, JSON.stringify({
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      maximized: !!maximized,
+    }));
+  } catch (e) {}
+}
+
+function currentFloatRect() {
+  if (!floatWindow) return null;
+  const r = floatWindow.getBoundingClientRect();
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+
+function clampFloatRect(rect) {
+  const margin = 8;
+  const maxWidth = Math.max(280, window.innerWidth - margin * 2);
+  const maxHeight = Math.max(260, window.innerHeight - margin * 2);
+  const width = Math.min(Math.max(Number(rect.width) || 560, 360), maxWidth);
+  const height = Math.min(Math.max(Number(rect.height) || 560, 320), maxHeight);
+  const left = Math.min(
+    Math.max(Number(rect.left) || margin, margin),
+    Math.max(margin, window.innerWidth - width - margin)
+  );
+  const top = Math.min(
+    Math.max(Number(rect.top) || margin, margin),
+    Math.max(margin, window.innerHeight - height - margin)
+  );
+  return { left: left, top: top, width: width, height: height };
+}
+
+function applyFloatRect(rect) {
+  if (!floatWindow) return;
+  floatWindow.style.left = Math.round(rect.left) + 'px';
+  floatWindow.style.top = Math.round(rect.top) + 'px';
+  floatWindow.style.width = Math.round(rect.width) + 'px';
+  floatWindow.style.height = Math.round(rect.height) + 'px';
+}
+
+function defaultFloatRect() {
+  const width = Math.min(640, Math.max(380, window.innerWidth - 80));
+  const height = Math.min(680, Math.max(360, window.innerHeight - 120));
+  return { left: window.innerWidth - width - 24, top: 56, width: width, height: height };
+}
+
+function updateFloatTitle() {
+  if (!floatWindow) return;
+  const title = floatWindow.querySelector('.float-title');
+  if (!title) return;
+  const labels = { video: 'Video', trace: 'Trace', steps: 'Pasos', implement: 'Implementar test' };
+  const flow = currentEvidenceFlow();
+  title.textContent = 'Evidence \u00b7 ' + (labels[evidenceState.tab] || 'Evidence') +
+    (flow && flow.title ? ' \u00b7 ' + flow.title : '');
+  title.title = title.textContent;
+}
+
+function updateFloatControls() {
+  if (evidenceFloatBtn) {
+    evidenceFloatBtn.hidden = !!floatWindow;
+    evidenceFloatBtn.textContent = 'Float';
+    evidenceFloatBtn.title = 'Float evidence';
+    evidenceFloatBtn.setAttribute('aria-label', 'Float evidence');
+  }
+  if (!floatWindow) return;
+  const maxBtn = floatWindow.querySelector('[data-float-max]');
+  if (maxBtn) {
+    maxBtn.textContent = floatMaximized ? 'Restore' : 'Max';
+    maxBtn.title = floatMaximized ? 'Restore window' : 'Maximize window';
+    maxBtn.setAttribute('aria-label', floatMaximized ? 'Restore window' : 'Maximize window');
+  }
+}
+
+function saveFloatState() {
+  if (!floatWindow) return;
+  if (floatMaximized && floatRestoreRect) {
+    writeFloatState(floatRestoreRect, true);
+    return;
+  }
+  const rect = currentFloatRect();
+  if (rect) writeFloatState(rect, false);
+}
+
+function toggleFloatMaximize(force) {
+  if (!floatWindow) return;
+  const want = force === undefined ? !floatMaximized : !!force;
+  if (want === floatMaximized) return;
+  if (want) {
+    const rect = currentFloatRect();
+    if (rect) floatRestoreRect = rect;
+    floatWindow.classList.add('maximized');
+    floatMaximized = true;
+  } else {
+    floatWindow.classList.remove('maximized');
+    floatMaximized = false;
+    if (floatRestoreRect) applyFloatRect(clampFloatRect(floatRestoreRect));
+  }
+  updateFloatControls();
+  saveFloatState();
+}
+
+function floatEvidence() {
+  if (floatWindow) return;
+  const saved = readFloatState();
+  const win = document.createElement('div');
+  win.className = 'float-window';
+  win.setAttribute('role', 'dialog');
+  win.setAttribute('aria-modal', 'false');
+  win.setAttribute('aria-label', 'Evidence tools');
+  win.setAttribute('tabindex', '-1');
+
+  const titlebar = document.createElement('div');
+  titlebar.className = 'float-titlebar';
+  const title = document.createElement('span');
+  title.className = 'float-title';
+  title.textContent = 'Evidence';
+  const actions = document.createElement('div');
+  actions.className = 'float-actions';
+  const maxBtn = document.createElement('button');
+  maxBtn.type = 'button';
+  maxBtn.className = 'float-action';
+  maxBtn.setAttribute('data-float-max', '');
+  maxBtn.textContent = 'Max';
+  maxBtn.title = 'Maximize window';
+  maxBtn.setAttribute('aria-label', 'Maximize window');
+  const dockBtn = document.createElement('button');
+  dockBtn.type = 'button';
+  dockBtn.className = 'float-action';
+  dockBtn.setAttribute('data-float-dock', '');
+  dockBtn.textContent = 'Dock';
+  dockBtn.title = 'Dock evidence';
+  dockBtn.setAttribute('aria-label', 'Dock evidence');
+  actions.appendChild(maxBtn);
+  actions.appendChild(dockBtn);
+  titlebar.appendChild(title);
+  titlebar.appendChild(actions);
+
+  const content = document.createElement('div');
+  content.className = 'float-content';
+  win.appendChild(titlebar);
+  win.appendChild(content);
+
+  floatWindow = win;
+  if (floatLayerEl) floatLayerEl.appendChild(win);
+  else document.body.appendChild(win);
+  content.appendChild(evidenceTabsRow);
+  content.appendChild(evidenceBody);
+  evidencePanelEl.classList.add('floating');
+  evidencePlaceholderEl.hidden = false;
+
+  const base = saved && saved.width && saved.height ? saved : defaultFloatRect();
+  applyFloatRect(clampFloatRect(base));
+  if (window.innerWidth < 760 || saved.maximized) toggleFloatMaximize(true);
+  updateFloatControls();
+  updateFloatTitle();
+
+  maxBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleFloatMaximize();
+  });
+  dockBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    dockEvidence();
+  });
+  titlebar.addEventListener('dblclick', function (e) {
+    if (e.target && e.target.closest && e.target.closest('button')) return;
+    toggleFloatMaximize();
+  });
+  titlebar.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0 || floatMaximized) return;
+    if (e.target && e.target.closest && e.target.closest('button')) return;
+    const rect = currentFloatRect();
+    if (!rect) return;
+    floatDrag = { x: e.clientX, y: e.clientY, left: rect.left, top: rect.top };
+    try {
+      titlebar.setPointerCapture(e.pointerId);
+    } catch (err) {}
+    e.preventDefault();
+  });
+  titlebar.addEventListener('pointermove', function (e) {
+    if (!floatDrag || !floatWindow) return;
+    const rect = currentFloatRect();
+    if (!rect) return;
+    applyFloatRect(clampFloatRect({
+      left: floatDrag.left + e.clientX - floatDrag.x,
+      top: floatDrag.top + e.clientY - floatDrag.y,
+      width: rect.width,
+      height: rect.height,
+    }));
+  });
+  function endDrag(e) {
+    if (!floatDrag) return;
+    floatDrag = null;
+    try {
+      titlebar.releasePointerCapture(e.pointerId);
+    } catch (err) {}
+    saveFloatState();
+  }
+  titlebar.addEventListener('pointerup', endDrag);
+  titlebar.addEventListener('pointercancel', endDrag);
+
+  if (typeof ResizeObserver === 'function') {
+    floatResizeObserver = new ResizeObserver(function () {
+      if (!floatWindow || floatMaximized || floatDrag) return;
+      saveFloatState();
+    });
+    floatResizeObserver.observe(win);
+  }
+  try {
+    win.focus();
+  } catch (e) {}
+}
+
+function dockEvidence() {
+  if (!floatWindow) return;
+  if (floatResizeObserver) {
+    floatResizeObserver.disconnect();
+    floatResizeObserver = null;
+  }
+  if (evidenceTabsRow) evidencePanelEl.insertBefore(evidenceTabsRow, evidencePlaceholderEl);
+  if (evidenceBody) evidencePanelEl.insertBefore(evidenceBody, evidencePlaceholderEl);
+  evidencePanelEl.classList.remove('floating');
+  evidencePlaceholderEl.hidden = true;
+  if (floatWindow.parentNode) floatWindow.parentNode.removeChild(floatWindow);
+  floatWindow = null;
+  floatMaximized = false;
+  floatRestoreRect = null;
+  floatDrag = null;
+  updateFloatControls();
+  if (typeof fillFlexibleSection === 'function') fillFlexibleSection();
+  if (typeof network !== 'undefined' && network && typeof network.redraw === 'function') {
+    setTimeout(function () { network.redraw(); }, 0);
+  }
+}
+
+if (evidenceFloatBtn) {
+  evidenceFloatBtn.addEventListener('click', function () {
+    if (floatWindow) dockEvidence();
+    else floatEvidence();
+  });
+}
+if (evidenceDockBtn) evidenceDockBtn.addEventListener('click', dockEvidence);
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && floatWindow) {
+    e.stopPropagation();
+    dockEvidence();
+  }
+});
+window.addEventListener('resize', function () {
+  if (!floatWindow || floatMaximized) return;
+  const rect = currentFloatRect();
+  if (!rect) return;
+  applyFloatRect(clampFloatRect(rect));
+  saveFloatState();
 });
 
 function findEntryForNode(nodeId) {
@@ -2540,13 +2849,20 @@ ${themeInitScript()}
       <span class="section-chevron" aria-hidden="true"></span>
       <span class="section-title">Evidence</span>
     </button>
-    <div id="evidence-tabs" role="tablist">
-      <button type="button" class="ev-tab" data-ev-tab="video" role="tab" aria-pressed="true">Video</button>
-      <button type="button" class="ev-tab" data-ev-tab="trace" role="tab" aria-pressed="false">Trace</button>
-      <button type="button" class="ev-tab" data-ev-tab="steps" role="tab" aria-pressed="false">Pasos</button>
-      <button type="button" class="ev-tab" data-ev-tab="implement" role="tab" aria-pressed="false" hidden disabled>Implementar test</button>
+    <div id="evidence-tabs-row">
+      <div id="evidence-tabs" role="tablist">
+        <button type="button" class="ev-tab" data-ev-tab="video" role="tab" aria-pressed="true">Video</button>
+        <button type="button" class="ev-tab" data-ev-tab="trace" role="tab" aria-pressed="false">Trace</button>
+        <button type="button" class="ev-tab" data-ev-tab="steps" role="tab" aria-pressed="false">Pasos</button>
+        <button type="button" class="ev-tab" data-ev-tab="implement" role="tab" aria-pressed="false" hidden disabled>Implementar test</button>
+      </div>
+      <button type="button" id="evidence-float-btn" class="ev-float-btn" title="Float evidence" aria-label="Float evidence">Float</button>
     </div>
     <div id="evidence-body"></div>
+    <div id="evidence-placeholder" class="ev-float-placeholder" hidden>
+      <span>Evidence is in a floating window.</span>
+      <button type="button" id="evidence-dock-btn" class="ev-float-dock">Dock</button>
+    </div>
   </div>
   <div class="sidebar-divider" role="separator" aria-orientation="horizontal" aria-label="Resize Evidence" data-section="evidence-panel" tabindex="0"></div>
   <div id="kinds-legend-wrap" class="collapsible-section">
@@ -2577,6 +2893,7 @@ ${themeInitScript()}
   <div class="sidebar-divider" role="separator" aria-orientation="horizontal" aria-label="Resize Flows legend" data-section="legend-wrap" tabindex="0"></div>
   <div id="stats">${stats}</div>
 </div>
+<div id="float-layer"></div>
 ${viewerScript(nodesJson, edgesJson, legendJson, kindsJson, evidenceJson)}
 </body>
 </html>`;
