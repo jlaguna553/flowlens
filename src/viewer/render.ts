@@ -1978,6 +1978,21 @@ function appendImplementRun(section, flow) {
   updateImplementView(flow.id);
 }
 
+function readResponseJson(res) {
+  return res.text().then(function (text) {
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        const snippet = text.replace(/\s+/g, ' ').slice(0, 200);
+        throw new Error('HTTP ' + res.status + (snippet ? ': ' + snippet : ''));
+      }
+    }
+    return { ok: res.ok, status: res.status, data: data || {} };
+  });
+}
+
 function startImplementRun(flowId) {
   const state = implementRunState(flowId);
   if (state.status === 'running') return;
@@ -1993,7 +2008,7 @@ function startImplementRun(flowId) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ flowId: String(flowId) }),
   }).then(function (res) {
-    return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+    return readResponseJson(res);
   }).then(function (result) {
     const data = result.data;
     state.id = data && data.id !== null && data.id !== undefined ? String(data.id) : null;
@@ -2013,7 +2028,12 @@ function startImplementRun(flowId) {
 function pollImplementRun(flowId) {
   const state = implementRunState(flowId);
   return fetch('/api/implement-test?id=' + encodeURIComponent(String(state.id)), { cache: 'no-store' }).then(function (res) {
-    return res.json();
+    return readResponseJson(res).then(function (result) {
+      if (!result.ok) {
+        throw new Error(result.data && result.data.error ? String(result.data.error) : 'HTTP ' + result.status);
+      }
+      return result.data;
+    });
   }).then(function (data) {
     if (data && data.log !== null && data.log !== undefined) {
       const incoming = String(data.log);
