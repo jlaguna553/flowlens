@@ -370,7 +370,7 @@ The agent command is configured in `flowlens.config.json` (an `agent` block) or 
 
 ```json
 {
-  "suite": "e2e",
+  "suite": "/absolute/path/to/target-repo/e2e",
   "projectName": "my-app",
   "flows": "flows.json",
   "agent": {
@@ -379,6 +379,11 @@ The agent command is configured in `flowlens.config.json` (an `agent` block) or 
   }
 }
 ```
+
+`suite` is resolved relative to the **config file**, which lives outside the target repo
+(`<dataDir>/<project>/`). `flowlens init` writes it as an absolute path; if you create the
+config by hand, use an absolute path. A relative path such as `"e2e"` points at
+`<dataDir>/<project>/e2e` and will fail when the agent is launched.
 
 Default when absent: `{ "command": "opencode", "argsTemplate": ["run", "{{prompt}}"] }`.
 Claude users: `{ "command": "claude", "argsTemplate": ["-p", "{{prompt}}"] }`.
@@ -463,6 +468,28 @@ Node is >= 20 and that `--project` / `--config` points at an existing
 `{ "command": "claude", "argsTemplate": ["-p", "{{prompt}}"] }`. Put the block in
 `flowlens.config.json` or `agent.json`. The array form avoids the shell; use the string
 form only when you need a shell pipeline.
+
+**Implementar test fails / the panel shows an error.** The run log now prints the exact
+command and working directory (`[flowlens] agent command: ...`, `[flowlens] agent cwd: ...`)
+and flowlens validates both before spawning. Common messages:
+
+- `agent command not found: opencode` — install the agent in the same environment that runs
+  `flowlens serve`, or set `agent.command` / use `--agent claude`.
+- `suite directory not found: ...` — the config's `suite` must be an absolute path (or
+  relative to the config file, not the target repo). `init` writes it absolute.
+- `flow not found in graph: F16` — the flow ID is not in the built graph (IDs are
+  case-sensitive). Rebuild with `flowlens build --project <name>` and use the exact ID.
+- `HTTP 404/500: <html>...` — the panel is not reaching the flowlens server. Serve the
+  viewer with `flowlens serve`, don't open `out/index.html` directly, and make sure any
+  proxy forwards `POST /api/implement-test` as JSON.
+- The agent exits nonzero with its own message (for example a provider/model error). If
+  `agent.argsTemplate` pins `--model`, that model must exist and be authenticated in the
+  environment that runs the server. Reproduce the launch by hand from the same `suite` and
+  with the same user: `opencode run "Reply with exactly: OK"`. If the default model returns
+  `UnknownError: Unexpected server error`, pin a model that works, e.g.
+  `"argsTemplate": ["run", "--model", "opencode/deepseek-v4.1-flash-free", "{{prompt}}"]`.
+  Capture the full `[flowlens]` log from the panel; if the server was restarted the in-memory
+  run log is lost, so copy it before restarting.
 
 **Automatic mapping failed.** `init` maps flows with the configured agent. If the agent is
 missing or the run fails, `init` keeps the scaffolded files and prints a warning. Retry with
