@@ -697,10 +697,12 @@ function writeAssets(suite, out, warn) {
     warn(`trace viewer assets not found at ${traceSource}`);
   }
 
-  const vendorSource = path.join(VENDOR_DIR, 'vis-network.min.js');
-  const vendorDest = path.join(out, 'vendor', 'vis-network.min.js');
-  fs.mkdirSync(path.dirname(vendorDest), { recursive: true });
-  fs.copyFileSync(vendorSource, vendorDest);
+  const vendorDest = path.join(out, 'vendor');
+  fs.mkdirSync(vendorDest, { recursive: true });
+  for (const file of ['vis-network.min.js', 'mermaid.min.js']) {
+    const source = path.join(VENDOR_DIR, file);
+    if (fs.existsSync(source)) fs.copyFileSync(source, path.join(vendorDest, file));
+  }
 }
 
 function testTaskFor(flow, nodes) {
@@ -765,22 +767,31 @@ export function build(options = {}) {
   }
 
   const flowList = Array.isArray(flows.flows) ? flows.flows : [];
-
-  const flowsOut = flowList.map((flow) => ({
-    id: flow.id ?? null,
-    title: flow.title ?? null,
-    coverage: flow.coverage ?? null,
-    actors: Array.isArray(flow.actors) ? flow.actors.slice() : [],
-    notes: flow.notes ?? null,
-    start: flow.start ?? null,
-    tests: (Array.isArray(flow.tests) ? flow.tests : []).map((spec) =>
-      resolveFlowTest(flow, spec, index, artifacts, mappedNodes, traceState, traceLinks, labels)
-    ),
-  }));
-
   const nodes = [];
   const links = [];
-  const pushNode = (node, flow) => {
+  const nodeByKey = new Map();
+  const nodeById = new Map();
+  const linkByKey = new Map();
+  const flowIdMaps = new Map();
+
+  const coverageRank = (value) => (value === 'uncovered' ? 2 : value === 'partial' ? 1 : 0);
+  const mergeCoverage = (left, right) => {
+    if (!left) return right ?? null;
+    if (!right) return left;
+    return coverageRank(right) > coverageRank(left) ? right : left;
+  };
+  const nodeKey = (node) => {
+    if (typeof node.sharedKey === 'string' && node.sharedKey) return `key:${node.sharedKey}`;
+    if (
+      (node.kind === 'backend' || node.kind === 'db') &&
+      typeof node.endpoint === 'string' &&
+      node.endpoint
+    ) {
+      return `endpoint:${node.kind}:${node.endpoint}`;
+    }
+    return `id:${node.id}`;
+  };
+  const canonicalNode = (node) => {
     const kind = node.kind ?? null;
     let label = node.label ?? node.id ?? null;
     let endpoint = node.endpoint ?? null;
@@ -792,48 +803,175 @@ export function build(options = {}) {
         if (resolved.matched || !node.label || node.label === technical) label = resolved.label;
       }
     }
-    nodes.push({
-      id: node.id ?? null,
+    return {
+      kind,
       label,
       endpoint,
-      kind,
-      shared: false,
-      payload: node.payload ?? null,
-      flow: flow.id ?? null,
-      flowName: flow.title ?? null,
-      module: node.module ?? null,
-      coverage: flow.coverage ?? null,
-      response: node.response ?? null,
-    });
+      file: node.file ?? null,
+      line: Number.isInteger(node.line) ? node.line : null,
+      component: node.component ?? null,
+      selector: node.selector ?? null,
+      payloadExample: node.payloadExample ?? null,
+      table: node.table ?? null,
+      dbFields: Array.isArray(node.dbFields) ? node.dbFields.slice() : null,
+    };
   };
+
   for (const flow of flowList) {
+    const flowId = flow.id ?? null;
+    const flowTitle = flow.title ?? flowId;
+    const idMap = new Map();
     const flowNodes = Array.isArray(flow.nodes) ? flow.nodes : [];
-    for (const node of flowNodes) pushNode(node, flow);
+    for (const node of flowNodes) {
+      const key = nodeKey(node);
+      const canonical = canonicalNode(node);
+      let target = node.id !== undefined && node.id !== null ? nodeById.get(node.id) : undefined;
+      if (!target) target = nodeByKey.get(key);
+      if (!target) {
+        target = {
+          id: node.id ?? null,
+          label: canonical.label,
+          endpoint: canonical.endpoint,
+          kind: canonical.kind,
+          shared: false,
+          payload: node.payload ?? null,
+          flow: flowId,
+          flowName: flowTitle,
+          flows: flowId ? [flowId] : [],
+          flowNames: flowId ? [flowTitle] : [],
+          module: node.module ?? null,
+          coverage: flow.coverage ?? null,
+          response: node.response ?? null,
+          file: canonical.file,
+          line: canonical.line,
+          component: canonical.component,
+          selector: canonical.selector,
+          payloadExample: canonical.payloadExample,
+          table: canonical.table,
+          dbFields: canonical.dbFields,
+        };
+        nodes.push(target);
+        nodeByKey.set(key, target);
+      } else {
+        target.shared = true;
+        if (flowId && !target.flows.includes(flowId)) {
+          target.flows.push(flowId);
+          target.flowNames.push(flowTitle);
+        }
+        target.coverage = mergeCoverage(target.coverage, flow.coverage);
+        if (!target.payload && node.payload) target.payload = node.payload;
+        if (!target.response && node.response) target.response = node.response;
+        if (!target.label && canonical.label) target.label = canonical.label;
+        if (!target.endpoint && canonical.endpoint) target.endpoint = canonical.endpoint;
+        if (!target.file && canonical.file) target.file = canonical.file;
+        if (!target.line && canonical.line) target.line = canonical.line;
+        if (!target.component && canonical.component) target.component = canonical.component;
+        if (!target.selector && canonical.selector) target.selector = canonical.selector;
+        if (target.payloadExample === null || target.payloadExample === undefined) {
+          if (canonical.payloadExample !== null && canonical.payloadExample !== undefined) {
+            target.payloadExample = canonical.payloadExample;
+          }
+        }
+        if (!target.table && canonical.table) target.table = canonical.table;
+        if (!target.dbFields && canonical.dbFields) target.dbFields = canonical.dbFields;
+      }
+      if (node.id !== undefined && node.id !== null) nodeById.set(node.id, target);
+      nodeByKey.set(key, target);
+      if (node.id !== undefined && node.id !== null) idMap.set(node.id, target.id);
+    }
+    flowIdMaps.set(flowId, idMap);
+
     for (const edge of Array.isArray(flow.edges) ? flow.edges : []) {
+      let from = null;
+      let to = null;
       if (Array.isArray(edge) && edge.length >= 2) {
-        links.push({ from: edge[0], to: edge[1] });
+        from = edge[0];
+        to = edge[1];
       } else if (edge && typeof edge === 'object') {
-        links.push({
-          from: edge.from ?? edge.source ?? null,
-          to: edge.to ?? edge.target ?? null,
-        });
+        from = edge.from ?? edge.source ?? null;
+        to = edge.to ?? edge.target ?? null;
+      } else {
+        continue;
+      }
+      from = idMap.get(from) ?? from;
+      to = idMap.get(to) ?? to;
+      const key = `${from}->${to}`;
+      const existing = linkByKey.get(key);
+      if (existing) {
+        if (flowId && !existing.flows.includes(flowId)) existing.flows.push(flowId);
+      } else {
+        const link = { from, to, flows: flowId ? [flowId] : [] };
+        links.push(link);
+        linkByKey.set(key, link);
       }
     }
   }
 
+  const flowsOut = flowList.map((flow) => {
+    const idMap = flowIdMaps.get(flow.id) ?? new Map();
+    const testFlow = {
+      ...flow,
+      nodes: (Array.isArray(flow.nodes) ? flow.nodes : []).map((node) => ({
+        ...node,
+        id: idMap.get(node.id) ?? node.id,
+      })),
+      edges: (Array.isArray(flow.edges) ? flow.edges : []).map((edge) => {
+        if (Array.isArray(edge)) {
+          return [idMap.get(edge[0]) ?? edge[0], idMap.get(edge[1]) ?? edge[1]];
+        }
+        if (edge && typeof edge === 'object') {
+          const from = edge.from ?? edge.source ?? null;
+          const to = edge.to ?? edge.target ?? null;
+          return {
+            ...edge,
+            from: idMap.get(from) ?? from,
+            to: idMap.get(to) ?? to,
+          };
+        }
+        return edge;
+      }),
+    };
+    return {
+      id: flow.id ?? null,
+      title: flow.title ?? null,
+      coverage: flow.coverage ?? null,
+      actors: Array.isArray(flow.actors) ? flow.actors.slice() : [],
+      notes: flow.notes ?? null,
+      start: flow.start ?? null,
+      mermaid: typeof flow.mermaid === 'string' ? flow.mermaid : null,
+      tests: (Array.isArray(flow.tests) ? flow.tests : []).map((spec) =>
+        resolveFlowTest(testFlow, spec, index, artifacts, mappedNodes, traceState, traceLinks, labels)
+      ),
+    };
+  });
+
   for (const link of traceLinkLog) {
     const key = `${link.from}->${link.to}`;
-    if (links.some((existing) => `${existing.from}->${existing.to}` === key)) continue;
-    links.push(link);
+    if (linkByKey.has(key)) continue;
+    const added = { from: link.from, to: link.to, flows: [] };
+    links.push(added);
+    linkByKey.set(key, added);
   }
 
   const testsTotal = flowsOut.reduce((sum, flow) => sum + flow.tests.length, 0);
 
   const nodesByFlow = new Map();
   for (const node of nodes) {
-    if (!node || !node.flow) continue;
-    if (!nodesByFlow.has(node.flow)) nodesByFlow.set(node.flow, []);
-    nodesByFlow.get(node.flow).push({ id: node.id, label: node.label, kind: node.kind });
+    const nodeFlows = Array.isArray(node.flows) && node.flows.length ? node.flows : node.flow ? [node.flow] : [];
+    for (const flowId of nodeFlows) {
+      if (!nodesByFlow.has(flowId)) nodesByFlow.set(flowId, []);
+      nodesByFlow.get(flowId).push({
+        id: node.id,
+        label: node.label,
+        kind: node.kind,
+        file: node.file,
+        line: node.line,
+        component: node.component,
+        selector: node.selector,
+        table: node.table,
+        dbFields: node.dbFields,
+      });
+    }
   }
   flowsOut.forEach((flow) => {
     flow.testTask = testTaskFor(flow, nodesByFlow.get(flow.id) ?? []);
@@ -862,7 +1000,8 @@ export function build(options = {}) {
       tests: testsTotal,
       artifacts: Object.keys(artifacts).length,
       mappedNodes: mappedNodes.size,
-      sharedNodes: 0,
+      sharedNodes: nodes.filter((node) => node.shared === true).length,
+      sharedLinks: links.filter((link) => Array.isArray(link.flows) && link.flows.length > 1).length,
       kinds: nodes.reduce((counts, node) => {
         const key = node.kind ?? 'unknown';
         counts[key] = (counts[key] ?? 0) + 1;

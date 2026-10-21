@@ -104,8 +104,19 @@ export function buildMapPrompt(info = {}) {
   lines.push('   - tests[] entries are join keys {spec,title} that must match the Playwright report');
   lines.push('   - add routes/controllers without E2E coverage as "uncovered" or "partial" flows');
   lines.push('   - nodes are {id,label,kind}, kind is interaction|backend|db|decision');
-  lines.push('   - edges are [from,to] pairs referencing existing node ids in the same flow');
-  lines.push('   - id must be unique and title must be a non-empty string');
+  lines.push('   - node ids must be unique within one flow; for a step shared by several flows (login, branch selector, shared API) reuse the SAME id in every flow');
+  lines.push('   - for backend/db nodes add "endpoint" (e.g. "POST /auth/login"); nodes with the same endpoint are merged as shared even when their ids differ');
+  lines.push('   - if a shared interaction has no natural endpoint, add "sharedKey" (e.g. "auth.login") and reuse it');
+  lines.push('   - do NOT suffix a shared node id with the flow id just to avoid collisions; repeats across flows are intentional');
+  lines.push('   - interaction nodes: add "file" (repo-relative), "line", "component" and "selector" when you can verify them');
+  lines.push('   - backend nodes: add "file", "line" and "payloadExample" (a small JSON or string example of the request body) when verified');
+  lines.push('   - db nodes: add "table" and "dbFields" (array of column names touched by the flow) when verified');
+  lines.push('   - never invent file paths, line numbers, selectors, payloads or database fields; omit what you cannot verify');
+  lines.push('   - edges are [from,to] pairs referencing node ids in the same flow');
+  lines.push('   - flow id must be unique and title must be a non-empty string');
+  lines.push('   - every flow must include "mermaid": a Mermaid sequenceDiagram string (no markdown fences) derived from its actors, nodes and edges');
+  lines.push('     example: "sequenceDiagram\\n  actor User\\n  participant UI\\n  participant API\\n  participant DB\\n  User->>UI: Login\\n  UI->>API: POST /auth/login\\n  API->>DB: SELECT user\\n  DB-->>API: row\\n  API-->>UI: 200 + token"');
+  lines.push('   - the mermaid diagram must describe the same flow and include its backend/db round-trips');
   lines.push(`   - suite.root must be "${relativeRoot}" (relative to the flowlens config directory)`);
   lines.push(`   - project must be "${project}"`);
   lines.push('3. Write the full JSON document to the draft path above.');
@@ -129,6 +140,8 @@ export function buildMapPrompt(info = {}) {
     lines.push('');
   }
   lines.push('Constraints:');
+  lines.push('- Shared nodes must keep the same kind and label semantics across flows; reuse id/sharedKey/endpoint instead of creating per-flow copies.');
+  lines.push('- Every flow needs a non-empty Mermaid sequenceDiagram in "mermaid"; never wrap it in markdown fences.');
   lines.push('- Do not create or modify files inside the target repository.');
   lines.push('- Only write the draft path above; write-flows persists it inside the flowlens data dir.');
   lines.push('- Do not invent tests that are not present in the repository.');

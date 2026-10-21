@@ -375,6 +375,7 @@ export function validateFlows(doc) {
     return errors;
   }
   const seen = new Set();
+  const globalNodes = new Map();
   doc.flows.forEach((flow, index) => {
     const where = `flows[${index}]`;
     if (!flow || typeof flow !== 'object') {
@@ -388,6 +389,9 @@ export function validateFlows(doc) {
     if (!COVERAGE_VALUES.has(flow.coverage)) {
       errors.push(`${where}.coverage must be covered|partial|uncovered`);
     }
+    if (flow.mermaid !== undefined && typeof flow.mermaid !== 'string') {
+      errors.push(`${where}.mermaid must be a string`);
+    }
     if (!Array.isArray(flow.nodes)) errors.push(`${where}.nodes must be an array`);
     else {
       const nodeIds = new Set();
@@ -398,10 +402,54 @@ export function validateFlows(doc) {
           return;
         }
         if (typeof node.id !== 'string' || !node.id) errors.push(`${nodeWhere}.id must be a non-empty string`);
-        else nodeIds.add(node.id);
+        else {
+          nodeIds.add(node.id);
+          const signature = `${node.kind ?? ''}|${node.endpoint ?? ''}`;
+          const previous = globalNodes.get(node.id);
+          if (previous && previous.signature !== signature) {
+            errors.push(
+              `${nodeWhere}.id "${node.id}" conflicts with flow ${previous.flow} (kind/endpoint differ)`
+            );
+          } else if (!previous) {
+            globalNodes.set(node.id, { signature, flow: flow.id });
+          }
+        }
         if (typeof node.label !== 'string' || !node.label) errors.push(`${nodeWhere}.label must be a non-empty string`);
         if (!NODE_KINDS.has(node.kind)) {
           errors.push(`${nodeWhere}.kind must be interaction|backend|db|decision`);
+        }
+        if (node.endpoint !== undefined && (typeof node.endpoint !== 'string' || !node.endpoint)) {
+          errors.push(`${nodeWhere}.endpoint must be a non-empty string`);
+        }
+        if (node.sharedKey !== undefined && (typeof node.sharedKey !== 'string' || !node.sharedKey)) {
+          errors.push(`${nodeWhere}.sharedKey must be a non-empty string`);
+        }
+        if (node.file !== undefined && (typeof node.file !== 'string' || !node.file)) {
+          errors.push(`${nodeWhere}.file must be a non-empty string`);
+        }
+        if (node.line !== undefined && (!Number.isInteger(node.line) || node.line < 1)) {
+          errors.push(`${nodeWhere}.line must be a positive integer`);
+        }
+        if (node.component !== undefined && (typeof node.component !== 'string' || !node.component)) {
+          errors.push(`${nodeWhere}.component must be a non-empty string`);
+        }
+        if (node.selector !== undefined && (typeof node.selector !== 'string' || !node.selector)) {
+          errors.push(`${nodeWhere}.selector must be a non-empty string`);
+        }
+        if (node.table !== undefined && (typeof node.table !== 'string' || !node.table)) {
+          errors.push(`${nodeWhere}.table must be a non-empty string`);
+        }
+        if (node.dbFields !== undefined) {
+          if (!Array.isArray(node.dbFields) || node.dbFields.some((field) => typeof field !== 'string' || !field)) {
+            errors.push(`${nodeWhere}.dbFields must be an array of non-empty strings`);
+          }
+        }
+        if (
+          node.payloadExample !== undefined &&
+          typeof node.payloadExample !== 'string' &&
+          (typeof node.payloadExample !== 'object' || node.payloadExample === null)
+        ) {
+          errors.push(`${nodeWhere}.payloadExample must be a string or an object`);
         }
       });
       if (flow.edges !== undefined) {
