@@ -84,9 +84,13 @@ tests -> they run with the flowlens reporter -> `flowlens_ingest_results` ->
       "title": "Sign in",
       "coverage": "covered",
       "actors": ["user"],
-      "nodes": [{ "id": "F1.login", "label": "Login", "kind": "interaction" }],
-      "edges": [["F1.login", "F1.home"]],
-      "tests": [{ "spec": "auth.spec.ts", "title": "signs in" }]
+      "nodes": [
+        { "id": "login", "label": "Login", "kind": "interaction", "sharedKey": "auth.login" },
+        { "id": "auth", "label": "POST /auth/login", "kind": "backend", "endpoint": "POST /auth/login" }
+      ],
+      "edges": [["login", "auth"]],
+      "tests": [{ "spec": "auth.spec.ts", "title": "signs in" }],
+      "mermaid": "sequenceDiagram\n  actor User\n  participant UI\n  participant API\n  User->>UI: Login\n  UI->>API: POST /auth/login\n  API-->>UI: 200 + token"
     }
   ],
   "moduleEdges": []
@@ -94,5 +98,10 @@ tests -> they run with the flowlens reporter -> `flowlens_ingest_results` ->
 ```
 
 `coverage` is one of `covered|partial|uncovered`; node `kind` is one of
-`interaction|backend|db|decision`. Coverage is derived from the Playwright report at
-build time, so run the reporter and rebuild after adding specs.
+`interaction|backend|db|decision`. Node ids are unique within a flow; reuse the same
+`id`/`sharedKey` for shared steps, and backend/db nodes with the same `endpoint` merge
+automatically. `mermaid` is the flow's Mermaid sequence diagram. Nodes can also include
+source metadata for Node Info: `file`, `line`, `component`, `selector` (interaction);
+`file`, `line`, `payloadExample` (backend); `table`, `dbFields` (db). Omit what cannot be
+verified. Coverage is derived from the Playwright report at build time, so run the reporter
+and rebuild after adding specs.

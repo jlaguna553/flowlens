@@ -148,7 +148,9 @@ The agent is chosen in this order:
 The chosen agent is stored in `flowlens.config.json`, so later `map` / `implement-test`
 runs reuse it. If the agent is not installed or fails, `init` still succeeds, keeps the
 scaffolded files, and prints a warning with the exact `flowlens map` command to retry.
-Mapping is also skipped when `flows.json` already contains flows.
+Mapping is also skipped when `flows.json` already contains flows. The mapping prompt asks the
+agent to reuse shared node ids/`sharedKey`s and to emit a Mermaid sequence diagram per flow,
+so re-map after upgrading to populate the **Secuencia** tab.
 
 Re-map at any time:
 
@@ -291,11 +293,12 @@ writes nothing.
       "coverage": "covered",
       "actors": ["user"],
       "nodes": [
-        { "id": "F1.login", "label": "Login", "kind": "interaction" },
-        { "id": "F1.auth", "label": "POST /auth/login", "kind": "backend" }
+        { "id": "login", "label": "Login", "kind": "interaction", "sharedKey": "auth.login" },
+        { "id": "auth", "label": "POST /auth/login", "kind": "backend", "endpoint": "POST /auth/login" }
       ],
-      "edges": [["F1.login", "F1.auth"]],
-      "tests": [{ "spec": "auth.spec.ts", "title": "signs in" }]
+      "edges": [["login", "auth"]],
+      "tests": [{ "spec": "auth.spec.ts", "title": "signs in" }],
+      "mermaid": "sequenceDiagram\n  actor User\n  participant UI\n  participant API\n  User->>UI: Login\n  UI->>API: POST /auth/login\n  API-->>UI: 200 + token"
     }
   ],
   "moduleEdges": []
@@ -304,8 +307,19 @@ writes nothing.
 
 Rules: `coverage` is `covered|partial|uncovered`; node `kind` is
 `interaction|backend|db|decision`; `edges` are `[from,to]` pairs of existing node ids;
-`tests` are `{ spec, title }` join keys. Coverage is derived from the Playwright report at
-build time (see the reporter section), so run the reporter and rebuild after adding specs.
+`tests` are `{ spec, title }` join keys. Node ids only need to be unique inside a flow:
+reuse the same `id`/`sharedKey` for a step shared by several flows (for example login or
+branch selection). Backend/db nodes with the same `endpoint` are merged automatically, even
+when their ids differ. Shared nodes render once, keep every flow that uses them, and the
+viewer lists those flows in Node Info.
+
+`mermaid` is optional but recommended: a Mermaid `sequenceDiagram` for the flow. The viewer
+shows it in the **Secuencia** tab with zoom and full-screen controls. Nodes can also carry
+source metadata used by Node Info: `file`, `line`, `component` and `selector` for
+interactions; `file`, `line` and `payloadExample` for backend calls; `table` and `dbFields`
+for database nodes. Omit values the mapper cannot verify. Coverage is derived from the
+Playwright report at build time (see the reporter section), so run the reporter and rebuild
+after adding specs.
 
 ### 2. Stand up the local test env
 
@@ -429,17 +443,28 @@ Open the printed URL (the MCP `flowlens_serve` tool defaults to port `8020`; the
 `serve` defaults to `8017`). The viewer shows:
 
 - **Graph** of flows and nodes, colored by flow and by node kind (`Front`, `Back`, `BD`,
-  `Decision`).
+  `Decision`), with three layouts: **Graphify** (original force graph), **Galaxia**
+  (constellation layout with starfield and flow clusters) and **Organigrama**
+  (top-down hierarchical tree).
 - **Collapsible, resizable sections**: Node Info, Evidence, Kinds, Flows. Each has its own
   scroll and a drag handle; the collapsed state is remembered.
-- **Node Info**: label, endpoint, kind, coverage, payload, response and neighbors.
+- **Node Info**: label, endpoint, kind, coverage, payload, response and neighbors, plus
+  type-specific details: frontend file/line, component and selector; backend source,
+  file/line and request payload example; database table and touched fields. Shared nodes list
+  every flow that uses them.
 - **Flows legend**: flow titles, select all, and a **coverage filter**
-  (All / Covered / Partial / Uncovered) that filters both the graph and the list. Click a
-  flow to zoom to its nodes, highlight its edges and dim the rest (`Clear` resets it).
+  (All / Covered / Partial / Uncovered) that filters both the graph and the list. Hover a
+  flow to preview its Mermaid sequence diagram; click the flow to zoom/highlight it and open
+  **Secuencia**, or click the preview to open the full-screen diagram (`Clear` resets focus).
+- **Hover a node** for a compact info card with its type-specific details; clicking the card
+  expands it. **Click the node itself** to focus/zoom its flow and load its evidence.
+- **Hover an edge** for a large Mermaid preview of the flow(s) it belongs to; **click the edge**
+  to focus/zoom its flow. Click the preview to open the full-screen sequence diagram.
 - **Click a node** to zoom and focus its flow, and jump the video to that node's step.
 - **Playback bar**: play/pause, scrubber, time, and a speed selector (`0.1x` to `2x`). As
   it plays, a cursor animates along the flow from node to node.
-- **Evidence tabs**: **Video**, **Trace**, **Pasos** (steps), and **Implementar test**
+- **Evidence tabs**: **Video**, **Trace**, **Pasos** (steps), **Secuencia** (Mermaid
+  sequence diagram with zoom and full-screen), and **Implementar test**
   (spec, command, acceptance criteria, uncovered nodes, and the **Ejecutar agente**
   button with a live log).
 - **Search** across nodes, plus light / dark / system themes.

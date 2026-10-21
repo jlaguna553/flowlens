@@ -107,6 +107,14 @@ Mapping is skipped with `--no-map` or when `flows.json` already has flows. If th
 missing or fails, `init` still succeeds with the scaffolded files and warns; retry with
 `flowlens map`.
 
+The mapping prompt asks the agent for more than flow topology: shared nodes (reuse the same
+`id` or `sharedKey` across flows, or let backend/db nodes merge by `endpoint`), a Mermaid
+`sequenceDiagram` in each flow's `mermaid` field, and source metadata for Node Info
+(`file`/`line`/`component`/`selector` on interactions, `file`/`line`/`payloadExample` on
+backend nodes, `table`/`dbFields` on database nodes). Re-map an existing project to populate
+the viewer's **Secuencia** tab and the richer node details; shared nodes then appear once and
+list every flow that uses them.
+
 ## Tools
 
 Every tool returns MCP content `[{ "type": "text", "text": "<JSON>" }]`. The JSON below is
