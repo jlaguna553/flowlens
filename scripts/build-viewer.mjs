@@ -19,5 +19,6 @@ const header =
   '// GENERATED FILE - do not edit.\n' +
   '// Source: src/viewer/render.ts (regenerate with: npm run build:viewer)\n\n';
 
-fs.writeFileSync(outputPath, header + output, 'utf8');
+const generated = (header + output).replace(/[ \t]+$/gm, '');
+fs.writeFileSync(outputPath, generated, 'utf8');
 process.stdout.write(`[flowlens] wrote ${path.relative(root, outputPath)}\n`);

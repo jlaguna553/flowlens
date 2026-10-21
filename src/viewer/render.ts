@@ -17,12 +17,21 @@ export interface FlowlensNode {
   label?: string;
   flow?: string;
   flowName?: string;
+  flows?: (string | number)[];
+  flowNames?: string[];
   community?: string | number;
   kind?: string;
   coverage?: string;
   shared?: boolean;
   sourceRef?: string;
   endpoint?: string;
+  file?: string;
+  line?: number;
+  component?: string;
+  selector?: string;
+  payloadExample?: unknown;
+  table?: string;
+  dbFields?: string[];
   payload?: unknown;
   response?: FlowlensResponse;
   [key: string]: unknown;
@@ -35,6 +44,7 @@ export interface FlowlensLink {
   target?: string | number;
   label?: string;
   relation?: string;
+  flows?: (string | number)[];
   [key: string]: unknown;
 }
 
@@ -109,6 +119,7 @@ export interface FlowlensFlow {
   notes?: string;
   tests?: FlowlensTest[];
   testTask?: FlowlensTestTask;
+  mermaid?: string;
   [key: string]: unknown;
 }
 
@@ -132,6 +143,7 @@ export interface FlowlensGraph {
 export interface RenderOptions {
   title?: string;
   vendorHref?: string;
+  mermaidHref?: string;
 }
 
 const FLOW_PALETTE = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"];
@@ -162,6 +174,25 @@ export function sanitizeLabel(value: unknown): string {
     text = text.slice(0, MAX_LABEL_LEN);
   }
   return text;
+}
+
+export function sanitizeDiagram(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").slice(0, 20000);
+}
+
+export function sanitizeExample(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.slice(0, 4000);
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 4000);
+  } catch {
+    return "";
+  }
+}
+
+export function sanitizeStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((entry) => sanitizeLabel(entry)).filter(Boolean) : [];
 }
 
 export function jsSafe(value: unknown): string {
@@ -320,10 +351,23 @@ function buildPayload(graph: FlowlensGraph) {
       title: label,
       flow,
       flowName: flowNames.get(flow) ?? flow,
+      flows: Array.isArray(node.flows) && node.flows.length
+        ? node.flows.map(function (f) { return sanitizeLabel(f); }).filter(Boolean)
+        : [flow],
+      flowNames: Array.isArray(node.flowNames) && node.flowNames.length
+        ? node.flowNames.map(function (f) { return sanitizeLabel(f); }).filter(Boolean)
+        : [flowNames.get(flow) ?? flow],
       kind,
       shared,
       coverage: sanitizeLabel(node.coverage ?? ""),
       endpoint: sanitizeLabel(node.endpoint ?? ""),
+      file: sanitizeLabel(node.file ?? ""),
+      line: Number.isInteger(Number(node.line)) && Number(node.line) > 0 ? Number(node.line) : null,
+      component: sanitizeLabel(node.component ?? ""),
+      selector: sanitizeLabel(node.selector ?? ""),
+      payloadExample: sanitizeExample(node.payloadExample),
+      table: sanitizeLabel(node.table ?? ""),
+      dbFields: sanitizeStringList(node.dbFields),
       payload: sanitizeLabel(node.payload ?? ""),
       response: normalizeResponse(node.response),
       degree: deg,
@@ -335,15 +379,14 @@ function buildPayload(graph: FlowlensGraph) {
   const nodeCoverage = new Map<string, string>();
   let sharedCount = 0;
   for (const node of visNodes) {
-    const item = node as { flow: string; kind: string; shared: boolean; coverage: string };
-    counts.set(item.flow, (counts.get(item.flow) ?? 0) + 1);
+    const item = node as { flow: string; flows?: string[]; kind: string; shared: boolean; coverage: string };
+    const itemFlows = Array.isArray(item.flows) && item.flows.length ? item.flows : [item.flow];
+    for (const flow of itemFlows) {
+      counts.set(flow, (counts.get(flow) ?? 0) + 1);
+      if (item.coverage && !nodeCoverage.has(flow)) nodeCoverage.set(flow, item.coverage);
+    }
     kindCounts.set(item.kind, (kindCounts.get(item.kind) ?? 0) + 1);
-    if (item.coverage && !nodeCoverage.has(item.flow)) {
-      nodeCoverage.set(item.flow, item.coverage);
-    }
-    if (item.shared) {
-      sharedCount += 1;
-    }
+    if (item.shared) sharedCount += 1;
   }
 
   const legend = order.map((flow) => {
@@ -378,6 +421,9 @@ function buildPayload(graph: FlowlensGraph) {
       dashes: false,
       width: 2,
       color: { color, opacity: 0.7 },
+      flows: Array.isArray(link.flows)
+        ? link.flows.map(function (f) { return sanitizeLabel(f); }).filter(Boolean)
+        : [],
     };
   });
 
@@ -538,6 +584,7 @@ function buildEvidence(graph: FlowlensGraph) {
       title: sanitizeLabel(flow.title ?? flow.name ?? id) || id,
       coverage: sanitizeLabel(flow.coverage ?? ""),
       notes: sanitizeLabel(flow.notes ?? ""),
+      mermaid: sanitizeDiagram(flow.mermaid ?? ""),
       tests,
       testTask: sanitizeTestTask(flow.testTask),
     });
@@ -560,7 +607,7 @@ function styles(): string {
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
-  #graph { flex: 1; min-width: 0; }
+  #graph { flex: 1; min-width: 0; position: relative; }
   #resize-handle { width: 6px; flex-shrink: 0; cursor: col-resize; background: var(--border); position: relative; z-index: 5; }
   #resize-handle:hover, #resize-handle:focus-visible, #resize-handle.dragging { background: #4E79A7; outline: none; }
   .sidebar-divider { height: 6px; flex: 0 0 auto; cursor: row-resize; background: var(--border); position: relative; z-index: 4; touch-action: none; }
@@ -584,6 +631,7 @@ function styles(): string {
   #info-content .field { margin-bottom: 5px; }
   #info-content .field b { color: var(--text); }
   #info-content .empty { color: var(--muted); font-style: italic; }
+  #info-content .info-code { margin: 4px 0 6px; padding: 8px; max-height: 180px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
   .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid var(--neighbor-border); }
   .neighbor-link:hover { background: var(--border); }
   #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
@@ -640,7 +688,7 @@ function styles(): string {
   .ev-float-btn:hover { color: var(--text); border-color: #4E79A7; }
   .ev-float-btn:focus-visible { outline: 2px solid #4E79A7; outline-offset: 2px; }
   .ev-float-btn[hidden] { display: none; }
-  .ev-tab { flex: 1; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 5px 0; font-size: 11px; cursor: pointer; }
+  .ev-tab { flex: 1; min-width: 0; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 5px 2px; font-size: 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ev-tab:hover { color: var(--text); }
   .ev-tab[aria-pressed="true"] { background: #4E79A7; border-color: #4E79A7; color: #fff; }
   .ev-tab[hidden] { display: none; }
@@ -696,6 +744,64 @@ function styles(): string {
   .float-window #evidence-body.ev-body-trace, .float-window #evidence-body.ev-body-video { overflow: hidden; }
   .float-window .ev-trace { flex: 1 1 auto; height: auto; min-height: 0; }
   .float-window .ev-run-log { max-height: 45vh; }
+
+  .ev-sequence { display: flex; flex-direction: column; gap: 8px; min-height: 360px; }
+  .ev-seq-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .ev-seq-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); }
+  .ev-seq-btn { background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 4px 8px; font-size: 11px; line-height: 1; cursor: pointer; }
+  .ev-seq-btn:hover:not([disabled]) { color: var(--text); border-color: #4E79A7; }
+  .ev-seq-btn[disabled] { opacity: 0.45; cursor: default; }
+  .ev-seq-btn:focus-visible { outline: 2px solid #4E79A7; outline-offset: 2px; }
+  .ev-seq-zoom { min-width: 42px; text-align: center; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .ev-seq-viewport { flex: 1 1 auto; min-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 12px; }
+  .ev-seq-canvas { display: inline-block; min-width: 100%; transform-origin: top left; }
+  .ev-seq-canvas svg { max-width: 100%; height: auto; }
+  .ev-seq-empty { color: var(--muted); font-style: italic; font-size: 12px; line-height: 1.5; }
+  .seq-modal { position: fixed; inset: 0; z-index: 95; background: rgba(0,0,0,0.68); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .seq-modal[hidden] { display: none; }
+  .seq-modal-panel { width: 96vw; height: 92vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 24px 70px rgba(0,0,0,0.5); overflow: hidden; }
+  .seq-modal-panel:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
+  .seq-modal-bar { flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .seq-modal-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); }
+  .seq-modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px; background: var(--bg); }
+  .seq-modal-canvas { display: inline-block; min-width: 100%; transform-origin: top left; }
+  .seq-modal-canvas svg { max-width: 100%; height: auto; }
+
+
+  #view-switch { position: fixed; top: 14px; left: 14px; z-index: 25; display: flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.2); }
+  #view-switch button { border: 1px solid transparent; background: transparent; color: var(--text-2); font-size: 11px; padding: 5px 9px; border-radius: 5px; cursor: pointer; }
+  #view-switch button:hover { color: var(--text); }
+  #view-switch button:focus-visible { outline: 2px solid #4E79A7; outline-offset: 1px; }
+  #view-switch button[aria-pressed="true"] { background: #4E79A7; border-color: #4E79A7; color: #fff; }
+  body.galaxy-view #graph { background-color: #05060f; background-image: radial-gradient(ellipse at 50% 45%, rgba(78,121,167,0.2), transparent 55%), radial-gradient(ellipse at 18% 72%, rgba(176,122,161,0.14), transparent 45%), radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.9), transparent), radial-gradient(1px 1px at 70px 120px, rgba(255,255,255,0.55), transparent), radial-gradient(1.5px 1.5px at 140px 60px, rgba(255,255,255,0.7), transparent); background-size: auto, auto, 220px 220px, 340px 340px, 480px 480px; }
+  body.galaxy-view #graph canvas { position: relative; z-index: 1; }
+  body.galaxy-view #view-switch { background: rgba(10,12,24,0.78); border-color: rgba(120,140,200,0.35); backdrop-filter: blur(8px); }
+
+  .node-preview, .edge-preview { position: fixed; z-index: 91; display: flex; flex-direction: column; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
+  .node-preview { width: 320px; max-height: 300px; }
+  .edge-preview { width: 460px; max-width: calc(100vw - 16px); max-height: 360px; }
+  .node-preview[hidden], .edge-preview[hidden] { display: none; }
+  .node-preview-title, .edge-preview-title { margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--text); }
+  .node-preview-body { max-height: 220px; overflow: auto; font-size: 12px; color: var(--text-3); line-height: 1.55; }
+  .edge-preview-canvas { max-height: 280px; overflow: auto; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  .edge-preview-canvas svg { max-width: 100%; height: auto; }
+  .node-preview-body .field, .node-modal-body .field { margin-bottom: 5px; }
+  .node-preview-body .field b, .node-modal-body .field b { color: var(--text); }
+  .node-preview-body .info-code, .node-modal-body .info-code { margin: 4px 0 8px; padding: 8px; max-height: 160px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  .node-preview-body .neighbor-link, .node-modal-body .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid var(--neighbor-border); }
+  .node-preview-body .neighbor-link:hover, .node-modal-body .neighbor-link:hover { background: var(--border); }
+  .node-modal { position: fixed; inset: 0; z-index: 96; background: rgba(0,0,0,0.68); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .node-modal[hidden] { display: none; }
+  .node-modal-panel { width: min(860px, 94vw); height: 84vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 24px 70px rgba(0,0,0,0.5); overflow: hidden; }
+  .node-modal-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .node-modal-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); }
+  .node-modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px; font-size: 13px; color: var(--text-3); line-height: 1.6; }
+  .flow-preview { position: fixed; z-index: 90; width: 360px; max-width: calc(100vw - 16px); padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
+  .flow-preview[hidden] { display: none; }
+  .flow-preview-title { margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--text); }
+  .flow-preview-canvas { max-height: 260px; overflow: auto; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  .flow-preview-canvas svg { max-width: 100%; height: auto; }
+  .flow-preview-hint { margin-top: 6px; text-align: right; font-size: 10px; color: var(--muted); }
 </style>`;
 }
 
@@ -730,13 +836,13 @@ const nodesDS = new vis.DataSet(RAW_NODES.map(function (n, i) {
     shape: n.shape, image: n.image, shapeProperties: n.shapeProperties, borderWidth: n.borderWidth,
     x: 30 * Math.sqrt(i) * Math.cos(i * 2.4),
     y: 30 * Math.sqrt(i) * Math.sin(i * 2.4),
-    flow: n.flow, flowName: n.flowName, kind: n.kind, shared: n.shared, coverage: n.coverage, endpoint: n.endpoint, payload: n.payload, response: n.response, degree: n.degree,
+    flow: n.flow, flowName: n.flowName, flows: n.flows, flowNames: n.flowNames, kind: n.kind, shared: n.shared, coverage: n.coverage, endpoint: n.endpoint, file: n.file, line: n.line, component: n.component, selector: n.selector, payloadExample: n.payloadExample, table: n.table, dbFields: n.dbFields, payload: n.payload, response: n.response, degree: n.degree,
   };
 }));
 
 const edgesDS = new vis.DataSet(RAW_EDGES.map(function (e, i) {
   return {
-    id: i, from: e.from, to: e.to, label: '', title: e.title, dashes: e.dashes, width: e.width, color: e.color,
+    id: i, from: e.from, to: e.to, label: '', title: e.title, dashes: e.dashes, width: e.width, color: e.color, flows: e.flows,
     arrows: { to: { enabled: true, scaleFactor: 0.5 } },
   };
 }));
@@ -751,12 +857,15 @@ const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
   },
   interaction: { hover: true, tooltipDelay: 100, hideEdgesOnDrag: true, navigationButtons: false, keyboard: false },
   nodes: { shape: 'dot', borderWidth: 1.5 },
-  edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },
+  edges: { smooth: { type: 'continuous', roundness: 0.2 }, hoverWidth: 3, selectionWidth: 3 },
 });
 
 const THEME_KEY = 'flowlens-theme';
+const VIEW_KEY = 'flowlens-view-mode';
 const themeMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
 let themeLabelColor = '#ffffff';
+let viewMode = 'original';
+let viewAnimationFrame = null;
 function themePref() {
   let p = null;
   try { p = localStorage.getItem(THEME_KEY); } catch (e) {}
@@ -769,11 +878,12 @@ function applyTheme(pref) {
   document.querySelectorAll('[data-theme-choice]').forEach(function (b) {
     b.setAttribute('aria-pressed', String(b.dataset.themeChoice === (pref || 'dark')));
   });
-  const labelColor = getComputedStyle(root).getPropertyValue('--node-label').trim();
+  const labelColor = viewMode === 'galaxy' ? '#ffffff' : getComputedStyle(root).getPropertyValue('--node-label').trim();
   if (labelColor && labelColor !== themeLabelColor) {
     themeLabelColor = labelColor;
     nodesDS.update(nodesDS.get().map(function (n) { return { id: n.id, font: Object.assign({}, n.font, { color: labelColor }) }; }));
   }
+  window.dispatchEvent(new CustomEvent('flowlens-themechange'));
 }
 document.querySelectorAll('[data-theme-choice]').forEach(function (b) {
   b.addEventListener('click', function () {
@@ -1061,10 +1171,9 @@ function coverageText(node) {
   if (node.coverage === 'partial') return 'Partial';
   return 'Uncovered';
 }
-function showInfo(nodeId) {
-  const n = nodesDS.get(nodeId);
-  if (!n) return;
-  const neighborIds = network.getConnectedNodes(nodeId);
+function nodeInfoHtml(n) {
+  if (!n) return '';
+  const neighborIds = network.getConnectedNodes(n.id);
   const items = neighborIds.map(function (nid) {
     const nb = nodesDS.get(nid);
     const color = nb && nb.color ? nb.color.background : '#555';
@@ -1073,7 +1182,29 @@ function showInfo(nodeId) {
   let html = '<div class="field"><b>' + esc(n.label) + '</b></div>';
   if (n.endpoint) html += '<div class="field">Endpoint: ' + esc(n.endpoint) + '</div>';
   if (n.kind) html += '<div class="field">Kind: ' + esc(n.kind) + '</div>';
-  if (n.flowName) html += '<div class="field">Flow: ' + esc(n.flowName) + '</div>';
+  if (n.shared && Array.isArray(n.flowNames) && n.flowNames.length > 1) {
+    html += '<div class="field"><b>Shared by:</b> ' + n.flowNames.map(esc).join(', ') + '</div>';
+  } else if (n.flowName) {
+    html += '<div class="field">Flow: ' + esc(n.flowName) + '</div>';
+  }
+  if (n.shared) html += '<div class="field">Shared node</div>';
+  const sourceLine = n.file ? (n.line ? n.file + ':' + n.line : n.file) : '';
+  if (n.kind === 'interaction') {
+    if (sourceLine) html += '<div class="field"><b>Frontend:</b> ' + esc(sourceLine) + '</div>';
+    if (n.component) html += '<div class="field"><b>Component:</b> ' + esc(n.component) + '</div>';
+    if (n.selector) html += '<div class="field"><b>Selector:</b> ' + esc(n.selector) + '</div>';
+  } else if (n.kind === 'backend') {
+    if (sourceLine) html += '<div class="field"><b>Source:</b> ' + esc(sourceLine) + '</div>';
+    if (n.payloadExample) {
+      html += '<div class="field"><b>Payload example:</b></div><pre class="info-code">' + esc(n.payloadExample) + '</pre>';
+    }
+  } else if (n.kind === 'db') {
+    if (n.table) html += '<div class="field"><b>Table:</b> ' + esc(n.table) + '</div>';
+    if (n.dbFields && n.dbFields.length) html += '<div class="field"><b>Fields:</b> ' + esc(n.dbFields.join(', ')) + '</div>';
+    if (sourceLine) html += '<div class="field"><b>Source:</b> ' + esc(sourceLine) + '</div>';
+  } else if (sourceLine) {
+    html += '<div class="field"><b>Source:</b> ' + esc(sourceLine) + '</div>';
+  }
   const cov = coverageText(n);
   if (cov) html += '<div class="field">Coverage: ' + esc(cov) + '</div>';
   if (n.payload) html += '<div class="field">Payload: ' + esc(n.payload) + '</div>';
@@ -1090,7 +1221,12 @@ function showInfo(nodeId) {
   if (neighborIds.length) {
     html += '<div class="field">Neighbors (' + neighborIds.length + ')</div><div id="neighbors-list">' + items + '</div>';
   }
-  infoContent.innerHTML = html;
+  return html;
+}
+function showInfo(nodeId) {
+  const n = nodesDS.get(nodeId);
+  if (!n) return;
+  infoContent.innerHTML = nodeInfoHtml(n);
 }
 function focusNode(nodeId) {
   network.selectNodes([nodeId]);
@@ -1105,8 +1241,14 @@ document.addEventListener('click', function (e) {
 });
 
 let hoveredNodeId = null;
-network.on('hoverNode', function (params) { hoveredNodeId = params.node; container.style.cursor = 'pointer'; });
-network.on('blurNode', function () { hoveredNodeId = null; container.style.cursor = 'default'; });
+network.on('hoverNode', function (params) {
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+  showNodePreview(params.node);
+});
+network.on('blurNode', function () { hoveredNodeId = null; container.style.cursor = 'default'; scheduleHideNodePreview(); });
+network.on('hoverEdge', function (params) { showEdgePreview(params.edge); });
+network.on('blurEdge', function () { scheduleHideEdgePreview(); });
 network.on('click', function (params) {
   if (params.nodes.length > 0) {
     const clicked = params.nodes[0];
@@ -1114,8 +1256,15 @@ network.on('click', function (params) {
     loadNodeEvidence(clicked);
     const node = nodesDS.get(clicked);
     if (node && node.flow) focusFlow(node.flow);
+  } else if (params.edges.length > 0) {
+    const target = edgeTargetFor(params.edges[0]);
+    if (target) {
+      hideEdgePreviewNow();
+      setFlowFocus(target.flowId, true);
+    }
+  } else if (hoveredNodeId === null) {
+    emptyInfo();
   }
-  else if (hoveredNodeId === null) emptyInfo();
 });
 
 const searchInput = document.getElementById('search');
@@ -1166,8 +1315,15 @@ function flowMatchesCoverage(flow) {
   if (coverageFilter === 'all') return true;
   return (FLOW_COVERAGE[flow] || '') === coverageFilter;
 }
+function nodeFlows(n) {
+  if (Array.isArray(n.flows) && n.flows.length) return n.flows;
+  return n.flow === null || n.flow === undefined || n.flow === '' ? [] : [n.flow];
+}
 function nodeHidden(n) {
-  return hiddenFlows.has(n.flow) || !flowMatchesCoverage(n.flow);
+  const flows = nodeFlows(n);
+  return flows.length > 0 && flows.every(function (flow) {
+    return hiddenFlows.has(flow) || !flowMatchesCoverage(flow);
+  });
 }
 function applyLegendVisibility() {
   LEGEND.forEach(function (c) {
@@ -1228,8 +1384,11 @@ LEGEND.forEach(function (c) {
   });
   item.innerHTML = '<div class="legend-dot" style="background:' + esc(c.color) + '"></div><span class="legend-label" title="' + esc(c.cid) + '">' + esc(c.label) + '</span><span class="legend-id" title="' + esc(c.cid) + '">' + esc(c.cid) + '</span><span class="legend-count">' + esc(c.count) + '</span>';
   item.prepend(cb);
+  item.addEventListener('mouseenter', function () { showFlowPreview(c.cid, item); });
+  item.addEventListener('mouseleave', scheduleHideFlowPreview);
   item.addEventListener('click', function (e) {
     if (e.target === cb) return;
+    hideFlowPreviewNow();
     setFlowFocus(c.cid, true);
   });
   legendItems[c.cid] = item;
@@ -1262,7 +1421,7 @@ KINDS.forEach(function (k) {
 
 function flowNodeIds(flow) {
   const ids = [];
-  RAW_NODES.forEach(function (n) { if (n.flow === flow) ids.push(n.id); });
+  RAW_NODES.forEach(function (n) { if (nodeFlows(n).indexOf(flow) !== -1) ids.push(n.id); });
   return ids;
 }
 function flowColorFor(flow) {
@@ -1270,9 +1429,13 @@ function flowColorFor(flow) {
   return found ? found.color : '#4E79A7';
 }
 function edgeInFlow(edge, flow) {
+  if (Array.isArray(edge.flows) && edge.flows.length) return edge.flows.indexOf(flow) !== -1;
   const fromNode = nodesDS.get(edge.from);
   const toNode = nodesDS.get(edge.to);
-  return !!((fromNode && fromNode.flow === flow) || (toNode && toNode.flow === flow));
+  return !!(
+    (fromNode && nodeFlows(fromNode).indexOf(flow) !== -1) ||
+    (toNode && nodeFlows(toNode).indexOf(flow) !== -1)
+  );
 }
 function updateLegendFocus() {
   LEGEND.forEach(function (c) {
@@ -1282,14 +1445,133 @@ function updateLegendFocus() {
   const clearBtn = document.getElementById('flow-focus-clear');
   if (clearBtn) clearBtn.hidden = !focusedFlowId;
 }
+const starSpriteCache = new Map();
+
+function starColorRgba(color, alpha) {
+  const value = String(color || '#ffffff').trim();
+  let r = 255;
+  let g = 255;
+  let b = 255;
+  const short = value.match(/^#([0-9a-f]{3})$/i);
+  const long = value.match(/^#([0-9a-f]{6})$/i);
+  if (short) {
+    r = parseInt(short[1][0] + short[1][0], 16);
+    g = parseInt(short[1][1] + short[1][1], 16);
+    b = parseInt(short[1][2] + short[1][2], 16);
+  } else if (long) {
+    r = parseInt(long[1].slice(0, 2), 16);
+    g = parseInt(long[1].slice(2, 4), 16);
+    b = parseInt(long[1].slice(4, 6), 16);
+  }
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function createStarSprite(color, dim) {
+  const key = String(color) + '|' + (dim ? 'dim' : 'bright');
+  if (starSpriteCache.has(key)) return starSpriteCache.get(key);
+  const size = 128;
+  const center = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  const alpha = dim ? 0.28 : 1;
+
+  const halo = ctx.createRadialGradient(center, center, 0, center, center, center);
+  halo.addColorStop(0, 'rgba(255,255,255,' + (0.96 * alpha) + ')');
+  halo.addColorStop(0.045, 'rgba(255,255,255,' + (0.9 * alpha) + ')');
+  halo.addColorStop(0.13, starColorRgba(color, 0.76 * alpha));
+  halo.addColorStop(0.32, starColorRgba(color, 0.3 * alpha));
+  halo.addColorStop(0.64, starColorRgba(color, 0.07 * alpha));
+  halo.addColorStop(1, starColorRgba(color, 0));
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(center, center, center, 0, Math.PI * 2);
+  ctx.fill();
+
+  const spikes = [
+    [0, 1],
+    [Math.PI / 2, 0.86],
+    [Math.PI / 4, 0.46],
+    [-Math.PI / 4, 0.34],
+  ];
+  for (const spike of spikes) {
+    const angle = spike[0];
+    const strength = spike[1];
+    ctx.save();
+    ctx.translate(center, center);
+    ctx.rotate(angle);
+    const gradient = ctx.createLinearGradient(-center, 0, center, 0);
+    gradient.addColorStop(0, starColorRgba(color, 0));
+    gradient.addColorStop(0.42, starColorRgba(color, 0.08 * strength * alpha));
+    gradient.addColorStop(0.5, 'rgba(255,255,255,' + (0.96 * strength * alpha) + ')');
+    gradient.addColorStop(0.58, starColorRgba(color, 0.08 * strength * alpha));
+    gradient.addColorStop(1, starColorRgba(color, 0));
+    ctx.fillStyle = gradient;
+    const thickness = Math.max(1, 1.5 * strength);
+    ctx.fillRect(-center, -thickness / 2, size, thickness);
+    ctx.restore();
+  }
+
+  const core = ctx.createRadialGradient(center, center, 0, center, center, size * 0.09);
+  core.addColorStop(0, 'rgba(255,255,255,' + alpha + ')');
+  core.addColorStop(0.55, 'rgba(255,255,255,' + (0.72 * alpha) + ')');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(center, center, size * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+
+  const url = canvas.toDataURL('image/png');
+  starSpriteCache.set(key, url);
+  return url;
+}
+
+function galaxyStarWeight(node) {
+  const flowCount = Array.isArray(node.flows) && node.flows.length ? node.flows.length : 1;
+  const degree = Math.max(0, Number(node.degree) || 0);
+  return (flowCount - 1) * 2.5 + Math.min(degree, 16) * 0.45 + (node.shared ? 0.5 : 0);
+}
+
+function galaxyStarSize(node, maxWeight) {
+  const weight = galaxyStarWeight(node);
+  const ratio = maxWeight > 0 ? weight / maxWeight : 0;
+  return Math.round((node.shared ? 28 : 22) + ratio * 30);
+}
+
+function galaxyNodeGlow(node) {
+  const base = node && node.color && node.color.background ? node.color.background : '#ffffff';
+  return node && node.shared ? '#ffd166' : base;
+}
+
+function galaxyTransparentColor() {
+  return {
+    background: 'rgba(0,0,0,0)',
+    border: 'rgba(0,0,0,0)',
+    hover: { background: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)' },
+    highlight: { background: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)' },
+  };
+}
+
 function applyFlowFocus() {
   const flow = focusedFlowId;
   nodesDS.update(RAW_NODES.map(function (n) {
-    if (!flow || n.flow === flow) {
-      return { id: n.id, color: n.color, font: Object.assign({}, n.font, { color: themeLabelColor }) };
+    if (!flow || nodeFlows(n).indexOf(flow) !== -1) {
+      return Object.assign({
+        id: n.id,
+        color: viewMode === 'galaxy' ? galaxyTransparentColor() : n.color,
+        font: Object.assign({}, n.font, { color: viewMode === 'galaxy' ? '#ffffff' : themeLabelColor }),
+      }, viewMode === 'galaxy' ? { image: n.galaxyImage } : {});
     }
-    const dimColor = { background: '#33334a', border: '#2a2a3e', highlight: { background: '#33334a', border: '#2a2a3e' } };
-    return { id: n.id, color: dimColor, font: Object.assign({}, n.font, { color: '#5f5f75' }) };
+    const dimColor = viewMode === 'galaxy'
+      ? galaxyTransparentColor()
+      : { background: '#33334a', border: '#2a2a3e', highlight: { background: '#33334a', border: '#2a2a3e' } };
+    return Object.assign({
+      id: n.id,
+      color: dimColor,
+      font: Object.assign({}, n.font, { color: viewMode === 'galaxy' ? '#8a8fa8' : '#5f5f75' }),
+    }, viewMode === 'galaxy' ? { image: n.galaxyDimImage || n.galaxyImage } : {});
   }));
   const accent = flow ? flowColorFor(flow) : null;
   const updates = [];
@@ -1307,6 +1589,257 @@ function applyFlowFocus() {
   updateLegendFocus();
   network.redraw();
 }
+function galaxyHash(text) {
+  const value = String(text);
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+function edgeGalaxyColor(edge) {
+  let flow = Array.isArray(edge.flows) && edge.flows.length ? edge.flows[0] : null;
+  if (!flow) {
+    const fromNode = nodesDS.get(edge.from);
+    const toNode = nodesDS.get(edge.to);
+    const fromFlows = fromNode ? nodeFlows(fromNode) : [];
+    const toFlows = toNode ? nodeFlows(toNode) : [];
+    flow = fromFlows[0] || toFlows[0] || null;
+  }
+  return flow ? flowColorFor(flow) : '#8892a6';
+}
+
+function organigramPositions() {
+  const ids = RAW_NODES.map(function (node) { return String(node.id); });
+  const incoming = new Map();
+  const outgoing = new Map();
+  const nodeById = new Map();
+  RAW_NODES.forEach(function (node) {
+    const id = String(node.id);
+    incoming.set(id, 0);
+    outgoing.set(id, []);
+    nodeById.set(id, node);
+  });
+  RAW_EDGES.forEach(function (edge) {
+    const from = String(edge.from);
+    const to = String(edge.to);
+    if (!outgoing.has(from) || !incoming.has(to)) return;
+    outgoing.get(from).push(to);
+    incoming.set(to, (incoming.get(to) || 0) + 1);
+  });
+  const levels = new Map();
+  let roots = ids.filter(function (id) { return (incoming.get(id) || 0) === 0; });
+  if (!roots.length && ids.length) roots = [ids[0]];
+  const queue = [];
+  roots.forEach(function (id) { levels.set(id, 0); queue.push(id); });
+  while (queue.length) {
+    const id = queue.shift();
+    const nextLevel = (levels.get(id) || 0) + 1;
+    (outgoing.get(id) || []).forEach(function (next) {
+      if (!levels.has(next)) {
+        levels.set(next, nextLevel);
+        queue.push(next);
+      }
+    });
+  }
+  ids.forEach(function (id) { if (!levels.has(id)) levels.set(id, 0); });
+  const groups = new Map();
+  ids.forEach(function (id) {
+    const level = levels.get(id);
+    if (!groups.has(level)) groups.set(level, []);
+    groups.get(level).push(id);
+  });
+  const flowOrder = new Map();
+  LEGEND.forEach(function (flow, index) { flowOrder.set(flow.cid, index); });
+  const positions = new Map();
+  Array.from(groups.keys()).sort(function (a, b) { return a - b; }).forEach(function (level) {
+    const list = groups.get(level).slice().sort(function (left, right) {
+      const a = nodeById.get(left);
+      const b = nodeById.get(right);
+      const af = a ? flowOrder.get(a.flow) || 0 : 0;
+      const bf = b ? flowOrder.get(b.flow) || 0 : 0;
+      if (af !== bf) return af - bf;
+      return String(a ? a.label : left).localeCompare(String(b ? b.label : right));
+    });
+    const width = (list.length - 1) * 170;
+    list.forEach(function (id, index) {
+      positions.set(id, { x: -width / 2 + index * 170, y: level * 150 });
+    });
+  });
+  return positions;
+}
+
+function galaxyPositions() {
+  const centers = new Map();
+  const count = Math.max(1, LEGEND.length);
+  LEGEND.forEach(function (flow, index) {
+    const angle = index * 2.399963 + 0.35;
+    const radius = 165 + (index / count) * 235;
+    centers.set(flow.cid, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+  });
+  const positions = new Map();
+  RAW_NODES.forEach(function (node) {
+    const flows = nodeFlows(node);
+    const known = flows.map(function (flow) { return centers.get(flow); }).filter(Boolean);
+    let cx = 0;
+    let cy = 0;
+    if (known.length) {
+      known.forEach(function (center) { cx += center.x; cy += center.y; });
+      cx /= known.length;
+      cy /= known.length;
+    } else {
+      const base = galaxyHash(node.id) * Math.PI * 2;
+      cx = Math.cos(base) * 90;
+      cy = Math.sin(base) * 90;
+    }
+    const angle = galaxyHash(String(node.id) + ':angle') * Math.PI * 2;
+    const radius = node.shared
+      ? 22 + galaxyHash(String(node.id) + ':shared') * 38
+      : 54 + galaxyHash(String(node.id) + ':radius') * 92 + Math.min(10, node.degree || 0) * 3;
+    positions.set(node.id, { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
+  });
+  return positions;
+}
+
+function updateViewButtons() {
+  document.querySelectorAll('[data-view-mode]').forEach(function (button) {
+    button.setAttribute('aria-pressed', String(button.dataset.viewMode === viewMode));
+  });
+}
+
+function stopViewAnimation() {
+  if (viewAnimationFrame) {
+    cancelAnimationFrame(viewAnimationFrame);
+    viewAnimationFrame = null;
+  }
+}
+
+function animateViewPositions(targets, duration) {
+  stopViewAnimation();
+  if (!targets) return;
+  const start = new Map();
+  RAW_NODES.forEach(function (node) {
+    const current = nodesDS.get(node.id);
+    start.set(String(node.id), {
+      x: Number(current && current.x) || 0,
+      y: Number(current && current.y) || 0,
+    });
+  });
+  const ids = Array.from(targets.keys());
+  const started = performance.now();
+  function frame(now) {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    nodesDS.update(ids.map(function (id) {
+      const from = start.get(id) || { x: 0, y: 0 };
+      const to = targets.get(id) || from;
+      return {
+        id: id,
+        x: from.x + (to.x - from.x) * eased,
+        y: from.y + (to.y - from.y) * eased,
+      };
+    }));
+    network.redraw();
+    if (progress < 1) {
+      viewAnimationFrame = requestAnimationFrame(frame);
+      return;
+    }
+    viewAnimationFrame = null;
+    const fitIds = focusedFlowId ? flowNodeIds(focusedFlowId) : RAW_NODES.map(function (node) { return node.id; });
+    network.fit({ nodes: fitIds, animation: { duration: 450, easingFunction: 'easeInOutQuad' } });
+  }
+  viewAnimationFrame = requestAnimationFrame(frame);
+}
+
+function applyViewMode(mode) {
+  viewMode = mode === 'galaxy' || mode === 'organigram' ? mode : 'original';
+  stopViewAnimation();
+  try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
+  document.body.classList.toggle('galaxy-view', viewMode === 'galaxy');
+  updateViewButtons();
+  if (viewMode === 'galaxy') {
+    network.stopSimulation();
+    network.setOptions({ physics: { enabled: false } });
+    const positions = galaxyPositions();
+    const maxStarWeight = RAW_NODES.reduce(function (max, node) {
+      return Math.max(max, galaxyStarWeight(node));
+    }, 0);
+    RAW_NODES.forEach(function (node) {
+      const glow = galaxyNodeGlow(node);
+      node.galaxyImage = createStarSprite(glow, false);
+      node.galaxyDimImage = createStarSprite(glow, true);
+      node.galaxyStarSize = galaxyStarSize(node, maxStarWeight);
+    });
+    nodesDS.update(RAW_NODES.map(function (node) {
+      return {
+        id: node.id,
+        shape: 'image',
+        image: node.galaxyImage,
+        shapeProperties: { useImageSize: false },
+        size: node.galaxyStarSize,
+        borderWidth: 0,
+        borderWidthSelected: 0,
+        color: galaxyTransparentColor(),
+        shadow: { enabled: false },
+      };
+    }));
+    edgesDS.update(RAW_EDGES.map(function (edge, index) {
+      return { id: index, color: { color: edgeGalaxyColor(edge), opacity: 0.5 }, width: 1.5 };
+    }));
+    applyFlowFocus();
+    animateViewPositions(positions, 820);
+    return;
+  } else if (viewMode === 'organigram') {
+    network.stopSimulation();
+    network.setOptions({ physics: { enabled: false } });
+    const positions = organigramPositions();
+    nodesDS.update(RAW_NODES.map(function (node) {
+      return {
+        id: node.id,
+        shape: 'image',
+        image: node.image,
+        shapeProperties: node.shapeProperties,
+        size: node.size,
+        borderWidth: node.shared ? 3 : 1.5,
+        borderWidthSelected: 2,
+        shadow: { enabled: false },
+      };
+    }));
+    edgesDS.update(RAW_EDGES.map(function (edge, index) {
+      return { id: index, color: edge.color, width: edge.width };
+    }));
+    applyFlowFocus();
+    animateViewPositions(positions, 820);
+    return;
+  } else {
+    network.setOptions({ physics: { enabled: true } });
+    nodesDS.update(RAW_NODES.map(function (node) {
+      return {
+        id: node.id,
+        shape: 'image',
+        image: node.image,
+        shapeProperties: node.shapeProperties,
+        size: node.size,
+        borderWidth: node.shared ? 3 : 1.5,
+        borderWidthSelected: 2,
+        shadow: { enabled: false },
+      };
+    }));
+    edgesDS.update(RAW_EDGES.map(function (edge, index) {
+      return { id: index, color: edge.color, width: edge.width };
+    }));
+    network.stabilize(180);
+    network.fit({ animation: true });
+  }
+  applyFlowFocus();
+}
+
+document.querySelectorAll('[data-view-mode]').forEach(function (button) {
+  button.addEventListener('click', function () { applyViewMode(button.dataset.viewMode); });
+});
+
 function focusFlow(flow) {
   if (flow === null || flow === undefined || flow === '') return;
   focusedFlowId = flow;
@@ -1329,7 +1862,9 @@ function setFlowFocus(flow, zoom) {
   const ids = flowNodeIds(flow);
   if (zoom && ids.length) network.fit({ nodes: ids, animation: true });
   const flowData = setEvidenceFlow(String(flow));
-  if (network.getSelectedNodes().length === 0 && flowNeedsTest(flowData)) {
+  if (flowData && flowData.mermaid) {
+    setEvidenceTab('sequence');
+  } else if (network.getSelectedNodes().length === 0 && flowNeedsTest(flowData)) {
     setEvidenceTab('implement');
   }
 }
@@ -1725,6 +2260,45 @@ let floatMaximized = false;
 let floatRestoreRect = null;
 let floatDrag = null;
 let floatResizeObserver = null;
+const sequenceModalEl = document.getElementById('sequence-modal');
+const sequenceModalCanvas = document.getElementById('sequence-modal-canvas');
+const sequenceModalTitleEl = document.getElementById('sequence-modal-title');
+const sequenceModalZoomEl = document.getElementById('sequence-modal-zoom');
+const sequenceModalClose = document.getElementById('sequence-modal-close');
+const sequenceModalZoomOut = document.getElementById('sequence-modal-zoom-out');
+const sequenceModalZoomIn = document.getElementById('sequence-modal-zoom-in');
+const sequenceModalZoomReset = document.getElementById('sequence-modal-zoom-reset');
+const sequenceModalFullscreen = document.getElementById('sequence-modal-fullscreen');
+let sequenceState = { code: '', flowId: null, zoom: 1 };
+let sequenceModalState = { code: '', flowId: null, zoom: 1 };
+let sequenceRenderId = 0;
+const flowPreviewEl = document.getElementById('flow-preview');
+const flowPreviewTitleEl = document.getElementById('flow-preview-title');
+const flowPreviewCanvas = document.getElementById('flow-preview-canvas');
+const sequencePreviewCache = new Map();
+let flowPreviewFlowId = null;
+let flowPreviewHideTimer = null;
+let flowPreviewToken = 0;
+const nodePreviewEl = document.getElementById('node-preview');
+const nodePreviewTitleEl = document.getElementById('node-preview-title');
+const nodePreviewBodyEl = document.getElementById('node-preview-body');
+const edgePreviewEl = document.getElementById('edge-preview');
+const edgePreviewTitleEl = document.getElementById('edge-preview-title');
+const edgePreviewCanvas = document.getElementById('edge-preview-canvas');
+const edgePreviewHintEl = document.getElementById('edge-preview-hint');
+const nodeModalEl = document.getElementById('node-modal');
+const nodeModalTitleEl = document.getElementById('node-modal-title');
+const nodeModalBodyEl = document.getElementById('node-modal-body');
+const nodeModalClose = document.getElementById('node-modal-close');
+let nodePreviewNodeId = null;
+let nodePreviewHideTimer = null;
+let edgePreviewFlowId = null;
+let edgePreviewHideTimer = null;
+let edgePreviewToken = 0;
+let lastPointer = { x: 0, y: 0 };
+document.addEventListener('pointermove', function (event) {
+  lastPointer = { x: event.clientX, y: event.clientY };
+});
 
 function flowNeedsTest(flow) {
   return !!flow && (flow.coverage === 'partial' || flow.coverage === 'uncovered');
@@ -2316,6 +2890,10 @@ function renderEvidenceBody() {
     else appendEmpty('sin tareas de test');
     return;
   }
+  if (evidenceState.tab === 'sequence') {
+    renderSequenceTab(flow);
+    return;
+  }
   if (!flow.tests || !flow.tests.length) {
     appendEmpty('sin cobertura');
     return;
@@ -2327,6 +2905,449 @@ function renderEvidenceBody() {
   else if (evidenceState.tab === 'steps') renderStepsTab(result);
   else renderVideoTab(result);
 }
+
+function sequenceMermaidTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
+}
+
+function renderSequenceMermaid(target, code) {
+  if (!target) return Promise.resolve();
+  const api = typeof window.mermaid !== 'undefined' ? window.mermaid : null;
+  if (!api) {
+    target.innerHTML = '<div class="ev-seq-empty">Mermaid no está disponible.</div>';
+    return Promise.resolve();
+  }
+  try {
+    api.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: sequenceMermaidTheme(),
+      sequence: { useMaxWidth: true, wrap: true },
+    });
+  } catch (error) {}
+  const id = 'flowlens-sequence-' + (++sequenceRenderId);
+  return api.render(id, code).then(function (result) {
+    const svg = typeof result === 'string' ? result : result && result.svg;
+    target.innerHTML = svg || '';
+    if (result && typeof result.bindFunctions === 'function') result.bindFunctions(target);
+  }).catch(function (error) {
+    target.innerHTML = '<div class="ev-seq-empty">Error al renderizar Mermaid: ' +
+      esc(error && error.message ? error.message : error) + '</div>';
+  });
+}
+
+function setSequenceZoom(kind, zoom) {
+  const state = kind === 'modal' ? sequenceModalState : sequenceState;
+  state.zoom = Math.min(4, Math.max(0.25, zoom));
+  const target = kind === 'modal' ? sequenceModalCanvas : evidenceBody.querySelector('.ev-seq-canvas');
+  const label = kind === 'modal' ? sequenceModalZoomEl : evidenceBody.querySelector('.ev-seq-zoom');
+  if (target) target.style.transform = 'scale(' + state.zoom + ')';
+  if (label) label.textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function openSequenceModal(flow) {
+  if (!sequenceModalEl) return;
+  sequenceModalState.code = flow && flow.mermaid ? flow.mermaid : '';
+  sequenceModalState.flowId = flow ? flow.id : null;
+  sequenceModalState.zoom = 1;
+  if (sequenceModalTitleEl) {
+    sequenceModalTitleEl.textContent = 'Secuencia' + (flow && flow.title ? ' · ' + flow.title : '');
+    sequenceModalTitleEl.title = sequenceModalTitleEl.textContent;
+  }
+  if (sequenceModalZoomEl) sequenceModalZoomEl.textContent = '100%';
+  sequenceModalEl.hidden = false;
+  if (sequenceModalCanvas) {
+    if (sequenceModalState.code) renderSequenceMermaid(sequenceModalCanvas, sequenceModalState.code);
+    else sequenceModalCanvas.innerHTML = '<div class="ev-seq-empty">Sin diagrama Mermaid.</div>';
+  }
+  setSequenceZoom('modal', 1);
+  if (sequenceModalClose) sequenceModalClose.focus();
+}
+
+function closeSequenceModal() {
+  if (!sequenceModalEl) return;
+  sequenceModalEl.hidden = true;
+  if (sequenceModalCanvas) sequenceModalCanvas.innerHTML = '';
+}
+
+function positionFlowPreview(item) {
+  if (!flowPreviewEl || !item) return;
+  const rect = item.getBoundingClientRect();
+  const width = 360;
+  let left = rect.left - width - 14;
+  if (left < 8) left = Math.min(window.innerWidth - width - 8, rect.right + 14);
+  const top = Math.min(Math.max(8, rect.top - 24), Math.max(8, window.innerHeight - 340));
+  flowPreviewEl.style.left = Math.max(8, left) + 'px';
+  flowPreviewEl.style.top = top + 'px';
+}
+
+function hideFlowPreviewNow() {
+  if (flowPreviewHideTimer) {
+    clearTimeout(flowPreviewHideTimer);
+    flowPreviewHideTimer = null;
+  }
+  flowPreviewFlowId = null;
+  flowPreviewToken += 1;
+  if (flowPreviewEl) flowPreviewEl.hidden = true;
+}
+
+function scheduleHideFlowPreview() {
+  if (flowPreviewHideTimer) clearTimeout(flowPreviewHideTimer);
+  flowPreviewHideTimer = setTimeout(hideFlowPreviewNow, 220);
+}
+
+function showFlowPreview(flowId, item) {
+  if (!flowPreviewEl || !item) return;
+  if (flowPreviewHideTimer) {
+    clearTimeout(flowPreviewHideTimer);
+    flowPreviewHideTimer = null;
+  }
+  const flow = EVIDENCE_BY_FLOW[String(flowId)];
+  flowPreviewFlowId = String(flowId);
+  positionFlowPreview(item);
+  flowPreviewEl.hidden = false;
+  if (flowPreviewTitleEl) {
+    flowPreviewTitleEl.textContent = flow && flow.title ? flow.title : String(flowId);
+    flowPreviewTitleEl.title = flowPreviewTitleEl.textContent;
+  }
+  if (!flowPreviewCanvas) return;
+  flowPreviewCanvas.innerHTML = '';
+  if (!flow || !flow.mermaid) {
+    flowPreviewCanvas.innerHTML = '<div class="ev-seq-empty">Sin diagrama Mermaid. Re-mapea para generarlo.</div>';
+    return;
+  }
+  const key = String(flowId) + '|' + sequenceMermaidTheme();
+  const cached = sequencePreviewCache.get(key);
+  if (cached) {
+    flowPreviewCanvas.innerHTML = cached;
+    return;
+  }
+  const token = ++flowPreviewToken;
+  const host = document.createElement('div');
+  renderSequenceMermaid(host, flow.mermaid).then(function () {
+    if (token !== flowPreviewToken || flowPreviewFlowId !== String(flowId)) return;
+    const html = host.innerHTML;
+    if (!html) return;
+    sequencePreviewCache.set(key, html);
+    flowPreviewCanvas.innerHTML = html;
+  });
+}
+
+if (flowPreviewEl) {
+  flowPreviewEl.addEventListener('mouseenter', function () {
+    if (flowPreviewHideTimer) {
+      clearTimeout(flowPreviewHideTimer);
+      flowPreviewHideTimer = null;
+    }
+  });
+  flowPreviewEl.addEventListener('mouseleave', scheduleHideFlowPreview);
+}
+if (flowPreviewCanvas) {
+  flowPreviewCanvas.addEventListener('click', function () {
+    const flow = flowPreviewFlowId ? EVIDENCE_BY_FLOW[flowPreviewFlowId] : null;
+    if (flow) openSequenceModal(flow);
+    hideFlowPreviewNow();
+  });
+}
+window.addEventListener('resize', hideFlowPreviewNow);
+window.addEventListener('scroll', hideFlowPreviewNow, true);
+
+function positionHoverCard(element, width, height) {
+  if (!element) return;
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, lastPointer.x + 12));
+  const top = Math.max(8, Math.min(window.innerHeight - height - 8, lastPointer.y + 12));
+  element.style.left = left + 'px';
+  element.style.top = top + 'px';
+}
+
+function hideNodePreviewNow() {
+  if (nodePreviewHideTimer) {
+    clearTimeout(nodePreviewHideTimer);
+    nodePreviewHideTimer = null;
+  }
+  nodePreviewNodeId = null;
+  if (nodePreviewEl) nodePreviewEl.hidden = true;
+}
+
+function scheduleHideNodePreview() {
+  if (nodePreviewHideTimer) clearTimeout(nodePreviewHideTimer);
+  nodePreviewHideTimer = setTimeout(hideNodePreviewNow, 220);
+}
+
+function showNodePreview(nodeId) {
+  if (!nodePreviewEl) return;
+  const node = nodesDS.get(nodeId);
+  if (!node) return;
+  hideEdgePreviewNow();
+  hideFlowPreviewNow();
+  if (nodePreviewHideTimer) {
+    clearTimeout(nodePreviewHideTimer);
+    nodePreviewHideTimer = null;
+  }
+  nodePreviewNodeId = nodeId;
+  if (nodePreviewTitleEl) nodePreviewTitleEl.textContent = node.label || String(nodeId);
+  if (nodePreviewBodyEl) nodePreviewBodyEl.innerHTML = nodeInfoHtml(node);
+  nodePreviewEl.hidden = false;
+  positionHoverCard(nodePreviewEl, 320, 300);
+}
+
+function openNodeInfoModal(nodeId) {
+  if (!nodeModalEl) return;
+  const node = nodesDS.get(nodeId);
+  if (!node) return;
+  if (nodeModalTitleEl) {
+    nodeModalTitleEl.textContent = node.label || String(nodeId);
+    nodeModalTitleEl.title = nodeModalTitleEl.textContent;
+  }
+  if (nodeModalBodyEl) nodeModalBodyEl.innerHTML = nodeInfoHtml(node);
+  hideNodePreviewNow();
+  hideEdgePreviewNow();
+  nodeModalEl.hidden = false;
+  if (nodeModalClose) nodeModalClose.focus();
+}
+
+function closeNodeInfoModal() {
+  if (!nodeModalEl) return;
+  nodeModalEl.hidden = true;
+  if (nodeModalBodyEl) nodeModalBodyEl.innerHTML = '';
+}
+
+function edgeTargetFor(edgeId) {
+  const edge = edgesDS.get(edgeId);
+  if (!edge) return null;
+  let flows = Array.isArray(edge.flows) ? edge.flows.slice() : [];
+  if (!flows.length) {
+    const fromNode = nodesDS.get(edge.from);
+    const toNode = nodesDS.get(edge.to);
+    const fromFlows = fromNode ? nodeFlows(fromNode) : [];
+    const toFlows = toNode ? nodeFlows(toNode) : [];
+    flows = fromFlows.concat(toFlows);
+  }
+  const unique = [];
+  flows.forEach(function (flow) {
+    if (flow !== null && flow !== undefined && unique.indexOf(flow) === -1) unique.push(flow);
+  });
+  const chosen = focusedFlowId && unique.indexOf(focusedFlowId) !== -1 ? focusedFlowId : unique[0];
+  const flow = chosen !== null && chosen !== undefined ? EVIDENCE_BY_FLOW[String(chosen)] : null;
+  return flow ? { flowId: String(chosen), flow: flow, count: unique.length } : null;
+}
+
+function hideEdgePreviewNow() {
+  if (edgePreviewHideTimer) {
+    clearTimeout(edgePreviewHideTimer);
+    edgePreviewHideTimer = null;
+  }
+  edgePreviewFlowId = null;
+  edgePreviewToken += 1;
+  if (edgePreviewEl) edgePreviewEl.hidden = true;
+}
+
+function scheduleHideEdgePreview() {
+  if (edgePreviewHideTimer) clearTimeout(edgePreviewHideTimer);
+  edgePreviewHideTimer = setTimeout(hideEdgePreviewNow, 220);
+}
+
+function showEdgePreview(edgeId) {
+  if (!edgePreviewEl) return;
+  const target = edgeTargetFor(edgeId);
+  if (!target) {
+    hideEdgePreviewNow();
+    return;
+  }
+  hideNodePreviewNow();
+  hideFlowPreviewNow();
+  if (edgePreviewHideTimer) {
+    clearTimeout(edgePreviewHideTimer);
+    edgePreviewHideTimer = null;
+  }
+  edgePreviewFlowId = target.flowId;
+  if (edgePreviewTitleEl) {
+    edgePreviewTitleEl.textContent = (target.flow.title || target.flowId) +
+      (target.count > 1 ? ' · ' + target.count + ' flujos' : '');
+    edgePreviewTitleEl.title = edgePreviewTitleEl.textContent;
+  }
+  if (edgePreviewHintEl) {
+    edgePreviewHintEl.textContent = target.count > 1
+      ? 'Arista compartida por ' + target.count + ' flujos · Click para maximizar'
+      : 'Click para maximizar';
+  }
+  edgePreviewEl.hidden = false;
+  positionHoverCard(edgePreviewEl, 460, 360);
+  if (!edgePreviewCanvas) return;
+  edgePreviewCanvas.innerHTML = '';
+  if (!target.flow.mermaid) {
+    edgePreviewCanvas.innerHTML = '<div class="ev-seq-empty">Este flujo todavía no tiene diagrama Mermaid.</div>';
+    return;
+  }
+  const key = target.flowId + '|' + sequenceMermaidTheme();
+  const cached = sequencePreviewCache.get(key);
+  if (cached) {
+    edgePreviewCanvas.innerHTML = cached;
+    return;
+  }
+  const token = ++edgePreviewToken;
+  const host = document.createElement('div');
+  renderSequenceMermaid(host, target.flow.mermaid).then(function () {
+    if (token !== edgePreviewToken || edgePreviewFlowId !== target.flowId) return;
+    const html = host.innerHTML;
+    if (!html) return;
+    sequencePreviewCache.set(key, html);
+    edgePreviewCanvas.innerHTML = html;
+  });
+}
+
+if (nodePreviewEl) {
+  nodePreviewEl.addEventListener('mouseenter', function () {
+    if (nodePreviewHideTimer) {
+      clearTimeout(nodePreviewHideTimer);
+      nodePreviewHideTimer = null;
+    }
+  });
+  nodePreviewEl.addEventListener('mouseleave', scheduleHideNodePreview);
+  nodePreviewEl.addEventListener('click', function () {
+    if (nodePreviewNodeId !== null) openNodeInfoModal(nodePreviewNodeId);
+  });
+}
+if (edgePreviewEl) {
+  edgePreviewEl.addEventListener('mouseenter', function () {
+    if (edgePreviewHideTimer) {
+      clearTimeout(edgePreviewHideTimer);
+      edgePreviewHideTimer = null;
+    }
+  });
+  edgePreviewEl.addEventListener('mouseleave', scheduleHideEdgePreview);
+}
+if (edgePreviewCanvas) {
+  edgePreviewCanvas.addEventListener('click', function () {
+    const flow = edgePreviewFlowId ? EVIDENCE_BY_FLOW[edgePreviewFlowId] : null;
+    if (flow) {
+      openSequenceModal(flow);
+      hideEdgePreviewNow();
+    }
+  });
+}
+if (nodeModalClose) nodeModalClose.addEventListener('click', closeNodeInfoModal);
+if (nodeModalEl) {
+  nodeModalEl.addEventListener('click', function (event) {
+    if (event.target === nodeModalEl) closeNodeInfoModal();
+  });
+}
+if (nodeModalBodyEl) {
+  nodeModalBodyEl.addEventListener('click', function (event) {
+    const link = event.target.closest ? event.target.closest('.neighbor-link') : null;
+    if (link && link.dataset.nid !== undefined) openNodeInfoModal(link.dataset.nid);
+  });
+}
+window.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && nodeModalEl && !nodeModalEl.hidden) {
+    event.stopImmediatePropagation();
+    closeNodeInfoModal();
+  }
+}, true);
+window.addEventListener('resize', function () {
+  hideNodePreviewNow();
+  hideEdgePreviewNow();
+});
+window.addEventListener('scroll', function () {
+  hideNodePreviewNow();
+  hideEdgePreviewNow();
+}, true);
+
+if (window.flowlensViewer) {
+  window.flowlensViewer.showNodePreview = showNodePreview;
+  window.flowlensViewer.openNodeInfo = openNodeInfoModal;
+  window.flowlensViewer.showEdgePreview = showEdgePreview;
+}
+
+function renderSequenceTab(flow) {
+  removeTraceFrame();
+  sequenceState.code = flow && flow.mermaid ? flow.mermaid : '';
+  sequenceState.flowId = flow ? flow.id : null;
+  sequenceState.zoom = 1;
+  const wrap = document.createElement('div');
+  wrap.className = 'ev-sequence';
+  const toolbar = document.createElement('div');
+  toolbar.className = 'ev-seq-toolbar';
+  const title = document.createElement('div');
+  title.className = 'ev-seq-title';
+  title.textContent = flow && flow.title ? 'Secuencia · ' + flow.title : 'Secuencia';
+  title.title = title.textContent;
+  const zoomOut = document.createElement('button');
+  zoomOut.type = 'button';
+  zoomOut.className = 'ev-seq-btn';
+  zoomOut.textContent = '-';
+  zoomOut.title = 'Zoom out';
+  zoomOut.setAttribute('aria-label', 'Zoom out');
+  const zoomLabel = document.createElement('span');
+  zoomLabel.className = 'ev-seq-zoom';
+  zoomLabel.textContent = '100%';
+  const zoomIn = document.createElement('button');
+  zoomIn.type = 'button';
+  zoomIn.className = 'ev-seq-btn';
+  zoomIn.textContent = '+';
+  zoomIn.title = 'Zoom in';
+  zoomIn.setAttribute('aria-label', 'Zoom in');
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'ev-seq-btn';
+  reset.textContent = 'Reset';
+  const full = document.createElement('button');
+  full.type = 'button';
+  full.className = 'ev-seq-btn';
+  full.textContent = 'Pantalla completa';
+  toolbar.appendChild(title);
+  toolbar.appendChild(zoomOut);
+  toolbar.appendChild(zoomLabel);
+  toolbar.appendChild(zoomIn);
+  toolbar.appendChild(reset);
+  toolbar.appendChild(full);
+  const viewport = document.createElement('div');
+  viewport.className = 'ev-seq-viewport';
+  const canvas = document.createElement('div');
+  canvas.className = 'ev-seq-canvas';
+  viewport.appendChild(canvas);
+  wrap.appendChild(toolbar);
+  wrap.appendChild(viewport);
+  evidenceBody.appendChild(wrap);
+  if (!sequenceState.code) {
+    canvas.innerHTML = '<div class="ev-seq-empty">Sin diagrama Mermaid. Vuelve a mapear los flujos para generarlo.</div>';
+    [zoomOut, zoomIn, reset, full].forEach(function (button) { button.disabled = true; });
+    return;
+  }
+  zoomOut.addEventListener('click', function () { setSequenceZoom('inline', sequenceState.zoom - 0.25); });
+  zoomIn.addEventListener('click', function () { setSequenceZoom('inline', sequenceState.zoom + 0.25); });
+  reset.addEventListener('click', function () { setSequenceZoom('inline', 1); });
+  full.addEventListener('click', function () { openSequenceModal(flow); });
+  renderSequenceMermaid(canvas, sequenceState.code);
+}
+
+if (sequenceModalClose) sequenceModalClose.addEventListener('click', closeSequenceModal);
+if (sequenceModalZoomOut) sequenceModalZoomOut.addEventListener('click', function () { setSequenceZoom('modal', sequenceModalState.zoom - 0.25); });
+if (sequenceModalZoomIn) sequenceModalZoomIn.addEventListener('click', function () { setSequenceZoom('modal', sequenceModalState.zoom + 0.25); });
+if (sequenceModalZoomReset) sequenceModalZoomReset.addEventListener('click', function () { setSequenceZoom('modal', 1); });
+if (sequenceModalFullscreen) {
+  sequenceModalFullscreen.addEventListener('click', function () {
+    const panel = sequenceModalEl ? sequenceModalEl.querySelector('.seq-modal-panel') : null;
+    if (panel && panel.requestFullscreen) panel.requestFullscreen();
+  });
+}
+if (sequenceModalEl) {
+  sequenceModalEl.addEventListener('click', function (event) {
+    if (event.target === sequenceModalEl) closeSequenceModal();
+  });
+}
+window.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && sequenceModalEl && !sequenceModalEl.hidden) {
+    event.stopImmediatePropagation();
+    closeSequenceModal();
+  }
+}, true);
+window.addEventListener('flowlens-themechange', function () {
+  if (evidenceState.tab === 'sequence' && evidenceState.flowId) renderEvidenceBody();
+  if (sequenceModalEl && !sequenceModalEl.hidden && sequenceModalState.code) {
+    renderSequenceMermaid(sequenceModalCanvas, sequenceModalState.code);
+  }
+});
 
 function highlightActiveStep(idx) {
   const items = document.querySelectorAll('.ev-step');
@@ -2414,7 +3435,7 @@ function updateFloatTitle() {
   if (!floatWindow) return;
   const title = floatWindow.querySelector('.float-title');
   if (!title) return;
-  const labels = { video: 'Video', trace: 'Trace', steps: 'Pasos', implement: 'Implementar test' };
+  const labels = { video: 'Video', trace: 'Trace', steps: 'Pasos', sequence: 'Secuencia', implement: 'Implementar test' };
   const flow = currentEvidenceFlow();
   title.textContent = 'Evidence \u00b7 ' + (labels[evidenceState.tab] || 'Evidence') +
     (flow && flow.title ? ' \u00b7 ' + flow.title : '');
@@ -2638,7 +3659,9 @@ function seekToEntry(entry) {
 function loadNodeEvidence(nodeId) {
   const node = nodesDS.get(nodeId);
   if (!node) return;
-  const flowId = node.flow === null || node.flow === undefined ? '' : String(node.flow);
+  const flows = nodeFlows(node);
+  const preferred = focusedFlowId && flows.indexOf(focusedFlowId) !== -1 ? focusedFlowId : node.flow;
+  const flowId = preferred === null || preferred === undefined ? '' : String(preferred);
   setEvidenceFlow(flowId);
   const entry = findEntryForNode(nodeId);
   if (entry) seekToEntry(entry);
@@ -2780,6 +3803,11 @@ if (playSpeed) playSpeed.addEventListener('change', function () {
   if (videoHasSrc()) evVideo.playbackRate = playback.speed;
 });
 
+updateViewButtons();
+try {
+  const savedView = localStorage.getItem(VIEW_KEY);
+  if (savedView === 'galaxy' || savedView === 'organigram') applyViewMode(savedView);
+} catch (e) {}
 setEvidenceTab('video');
 emptyInfo();
 </script>`;
@@ -2794,6 +3822,7 @@ export function renderHtml(graph: FlowlensGraph = { nodes: [] }, options: Render
   const kindsJson = jsSafe(payload.kinds);
   const evidenceJson = jsSafe(evidence);
   const vendorHref = escHtml(options.vendorHref ?? DEFAULT_VENDOR_HREF);
+  const mermaidHref = escHtml(options.mermaidHref ?? "./vendor/mermaid.min.js");
   const title = escHtml(sanitizeLabel(options.title ?? "flowlens"));
   const stats = payload.nodes.length + " nodes &middot; " + payload.edges.length + " edges &middot; " + payload.legend.length + " flows";
 
@@ -2804,11 +3833,17 @@ export function renderHtml(graph: FlowlensGraph = { nodes: [] }, options: Render
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>flowlens - ${title}</title>
 <script src="${vendorHref}"></script>
+<script src="${mermaidHref}"></script>
 ${styles()}
 ${themeInitScript()}
 </head>
 <body>
 <div id="graph"></div>
+<div id="view-switch" role="group" aria-label="Graph view">
+  <button type="button" data-view-mode="original" aria-pressed="true" title="Graphify original">Graphify</button>
+  <button type="button" data-view-mode="galaxy" aria-pressed="false" title="Estrellas más grandes = nodos más compartidos o conectados">Galaxia</button>
+  <button type="button" data-view-mode="organigram" aria-pressed="false" title="Vista jerárquica tipo organigrama">Organigrama</button>
+</div>
 <div id="resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
 <div id="sidebar">
   <div id="theme-wrap" role="group" aria-label="Theme">
@@ -2851,10 +3886,11 @@ ${themeInitScript()}
     </button>
     <div id="evidence-tabs-row">
       <div id="evidence-tabs" role="tablist">
-        <button type="button" class="ev-tab" data-ev-tab="video" role="tab" aria-pressed="true">Video</button>
-        <button type="button" class="ev-tab" data-ev-tab="trace" role="tab" aria-pressed="false">Trace</button>
-        <button type="button" class="ev-tab" data-ev-tab="steps" role="tab" aria-pressed="false">Pasos</button>
-        <button type="button" class="ev-tab" data-ev-tab="implement" role="tab" aria-pressed="false" hidden disabled>Implementar test</button>
+        <button type="button" class="ev-tab" data-ev-tab="video" role="tab" aria-pressed="true" title="Video">Video</button>
+        <button type="button" class="ev-tab" data-ev-tab="trace" role="tab" aria-pressed="false" title="Trace">Trace</button>
+        <button type="button" class="ev-tab" data-ev-tab="steps" role="tab" aria-pressed="false" title="Pasos">Pasos</button>
+        <button type="button" class="ev-tab" data-ev-tab="sequence" role="tab" aria-pressed="false" title="Secuencia">Secuencia</button>
+        <button type="button" class="ev-tab" data-ev-tab="implement" role="tab" aria-pressed="false" title="Implementar test" hidden disabled>Implementar</button>
       </div>
       <button type="button" id="evidence-float-btn" class="ev-float-btn" title="Float evidence" aria-label="Float evidence">Float</button>
     </div>
@@ -2894,6 +3930,46 @@ ${themeInitScript()}
   <div id="stats">${stats}</div>
 </div>
 <div id="float-layer"></div>
+<div id="flow-preview" class="flow-preview" hidden>
+  <div class="flow-preview-title" id="flow-preview-title"></div>
+  <div class="flow-preview-canvas" id="flow-preview-canvas"></div>
+  <div class="flow-preview-hint">Click para ver el diagrama completo</div>
+</div>
+<div id="node-preview" class="node-preview" hidden>
+  <div class="node-preview-title" id="node-preview-title"></div>
+  <div class="node-preview-body" id="node-preview-body"></div>
+  <div class="flow-preview-hint">Click para ampliar</div>
+</div>
+<div id="edge-preview" class="edge-preview" hidden>
+  <div class="edge-preview-title" id="edge-preview-title"></div>
+  <div class="edge-preview-canvas" id="edge-preview-canvas"></div>
+  <div class="flow-preview-hint" id="edge-preview-hint">Click para maximizar</div>
+</div>
+<div id="node-modal" class="node-modal" hidden>
+  <div class="node-modal-panel" role="dialog" aria-modal="true" aria-label="Node information">
+    <div class="node-modal-bar">
+      <span class="node-modal-title" id="node-modal-title"></span>
+      <button type="button" class="ev-seq-btn" id="node-modal-close">Cerrar</button>
+    </div>
+    <div class="node-modal-body" id="node-modal-body"></div>
+  </div>
+</div>
+<div id="sequence-modal" class="seq-modal" hidden>
+  <div class="seq-modal-panel" role="dialog" aria-modal="true" aria-label="Diagrama de secuencia">
+    <div class="seq-modal-bar">
+      <span class="seq-modal-title" id="sequence-modal-title">Secuencia</span>
+      <button type="button" class="ev-seq-btn" id="sequence-modal-zoom-out" aria-label="Zoom out">-</button>
+      <span class="ev-seq-zoom" id="sequence-modal-zoom">100%</span>
+      <button type="button" class="ev-seq-btn" id="sequence-modal-zoom-in" aria-label="Zoom in">+</button>
+      <button type="button" class="ev-seq-btn" id="sequence-modal-zoom-reset">Reset</button>
+      <button type="button" class="ev-seq-btn" id="sequence-modal-fullscreen">Pantalla completa</button>
+      <button type="button" class="ev-seq-btn" id="sequence-modal-close">Cerrar</button>
+    </div>
+    <div class="seq-modal-body" id="sequence-modal-body">
+      <div class="seq-modal-canvas" id="sequence-modal-canvas"></div>
+    </div>
+  </div>
+</div>
 ${viewerScript(nodesJson, edgesJson, legendJson, kindsJson, evidenceJson)}
 </body>
 </html>`;
