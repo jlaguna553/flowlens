@@ -8,6 +8,8 @@ import { startServer } from './server.mjs';
 import { startMcp, validateFlows } from './mcp.mjs';
 import { envUp, envDown, envStatus } from './env.mjs';
 import { mapProject, agentForAlias, resolveAgentForEnvironment } from './map.mjs';
+import { resolveAgentProject } from './agent.mjs';
+import { ensureOpencodeModel, extractModel } from './models.mjs';
 import { resolveConfigPath, resolveDataDir, projectDir } from './paths.mjs';
 
 const REPORTER_PATH = fileURLToPath(new URL('./reporter.mjs', import.meta.url));
@@ -194,7 +196,7 @@ async function runInit(args) {
   const suiteArg = typeof args.suite === 'string' ? args.suite : null;
   if (!suiteArg) {
     process.stderr.write(
-      'usage: flowlens init --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--timeout <ms>] [--force]\n'
+      'usage: flowlens init --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--model <provider/model>] [--no-map] [--tests-dir <dir>|--isolated-tests] [--timeout <ms>] [--force]\n'
     );
     process.exitCode = 1;
     return;
@@ -220,6 +222,12 @@ async function runInit(args) {
       argsTemplate: chosenAgent.argsTemplate,
     },
   };
+  if (args['isolated-tests'] === true || typeof args['tests-dir'] === 'string') {
+    config.tests = {
+      mode: args['isolated-tests'] === true ? 'isolated' : 'project',
+      dir: typeof args['tests-dir'] === 'string' ? args['tests-dir'] : 'tests',
+    };
+  }
   if (!force && fs.existsSync(configPath)) {
     process.stdout.write(`[flowlens] kept existing ${configPath}\n`);
   } else {
@@ -265,11 +273,34 @@ async function runInit(args) {
 
   const flowsDoc = readJsonSafe(flowsPath);
   const hasFlows = Array.isArray(flowsDoc && flowsDoc.flows) && flowsDoc.flows.length > 0;
+  const ensureInitModel = async () => {
+    if (chosenAgent.command !== 'opencode') return;
+    try {
+      const ensured = await ensureOpencodeModel({
+        agent: chosenAgent,
+        configPath,
+        cwd: suite,
+        preferred: typeof args.model === 'string' ? args.model : undefined,
+        timeoutMs: 45000,
+        onLog: (line) => process.stderr.write(`${line}\n`),
+      });
+      if (ensured.model) {
+        chosenAgent.argsTemplate = ensured.agent.argsTemplate;
+        process.stdout.write(`[flowlens] agent model ${ensured.model}\n`);
+      } else {
+        process.stderr.write('[flowlens] WARNING: no reachable opencode model found; pass --model or sign in to a provider\n');
+      }
+    } catch (error) {
+      process.stderr.write(`[flowlens] model check warning: ${error && error.message ? error.message : error}\n`);
+    }
+  };
   if (args['no-map'] === true) {
+    await ensureInitModel();
     process.stdout.write('[flowlens] mapping skipped (--no-map)\n');
     return;
   }
   if (hasFlows) {
+    await ensureInitModel();
     process.stdout.write('[flowlens] kept existing flows; run flowlens map to re-map\n');
     return;
   }
@@ -283,6 +314,7 @@ async function runInit(args) {
   try {
     const mapped = await mapProject({
       configPath,
+      model: typeof args.model === 'string' ? args.model : undefined,
       timeoutMs: typeof args.timeout === 'string' ? Number(args.timeout) : undefined,
       onLog: (line) => process.stdout.write(`[agent] ${line}\n`),
     });
@@ -322,6 +354,7 @@ async function runMap(args) {
     const result = await mapProject({
       ...selectionArgs(args),
       agent,
+      model: typeof args.model === 'string' ? args.model : undefined,
       dryRun,
       timeoutMs,
       outDir: typeof args.out === 'string' ? args.out : undefined,
@@ -418,7 +451,26 @@ function resolveServeOut(args) {
   return path.join(path.dirname(path.resolve(configPath)), 'out');
 }
 
+async function ensureConfiguredModel(selection) {
+  try {
+    const project = resolveAgentProject(selection);
+    if (!project || !project.agent || project.agent.command !== 'opencode') return;
+    if (extractModel(project.agent.argsTemplate)) return;
+    const ensured = await ensureOpencodeModel({
+      agent: project.agent,
+      configPath: project.configPath,
+      cwd: project.suite,
+      timeoutMs: 45000,
+      onLog: (line) => process.stderr.write(`${line}\n`),
+    });
+    if (ensured.model) process.stderr.write(`[flowlens] agent model ${ensured.model}\n`);
+  } catch (error) {
+    process.stderr.write(`[flowlens] model check warning: ${error && error.message ? error.message : error}\n`);
+  }
+}
+
 async function runServe(args) {
+  await ensureConfiguredModel(selectionArgs(args));
   const outDir = resolveServeOut(args);
   if (!outDir) {
     process.stderr.write(
@@ -437,6 +489,7 @@ async function runServe(args) {
 }
 
 async function runMcp(args) {
+  await ensureConfiguredModel(selectionArgs(args));
   await startMcp({
     ...selectionArgs(args),
     outDir: typeof args.out === 'string' ? args.out : undefined,
@@ -481,8 +534,8 @@ async function main() {
   else {
     process.stderr.write(
       'usage: flowlens <init|map|write-flows|build|serve|mcp|env|reporter-path>\n' +
-        '  init  --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--no-map] [--timeout <ms>] [--force]\n' +
-        '  map   [--project <name>|--config <path>] [--data-dir <dir>] [--agent opencode|claude] [--dry-run] [--timeout <ms>]\n' +
+        '  init  --suite <path> [--project <name>] [--data-dir <dir>] [--agent opencode|claude] [--model <provider/model>] [--no-map] [--tests-dir <dir>|--isolated-tests] [--timeout <ms>] [--force]\n' +
+        '  map   [--project <name>|--config <path>] [--data-dir <dir>] [--agent opencode|claude] [--model <provider/model>] [--dry-run] [--timeout <ms>]\n' +
         '  write-flows --file <flows.json> [--project <name>|--config <path>] [--data-dir <dir>]\n' +
         '  build [--project <name>|--config <path>] [--data-dir <dir>] [--run <path>] [--report <dir>] [--out <dir>]\n' +
         '  serve [--project <name>|--config <path>] [--data-dir <dir>] [--out <dir>] [--port <n>]\n' +

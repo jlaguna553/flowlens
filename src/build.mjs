@@ -699,20 +699,20 @@ function writeAssets(suite, out, warn) {
 
   const vendorDest = path.join(out, 'vendor');
   fs.mkdirSync(vendorDest, { recursive: true });
-  for (const file of ['vis-network.min.js', 'mermaid.min.js']) {
+  for (const file of ['vis-network.min.js', 'mermaid.min.js', '3d-force-graph.min.js']) {
     const source = path.join(VENDOR_DIR, file);
     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(vendorDest, file));
   }
 }
 
-function testTaskFor(flow, nodes) {
+function testTaskFor(flow, nodes, directory) {
   if (!flow || (flow.coverage !== 'partial' && flow.coverage !== 'uncovered')) return null;
   const name = slug(flow.title || flow.id);
-  const specRel = path.join('tests', `${name}.spec.ts`);
+  const specFilePath = path.join(directory, `${name}.spec.ts`);
   return {
-    suggestedSpecFile: `${name}.spec.ts`,
+    suggestedSpecFile: specFilePath,
     acceptance: [
-      `Playwright spec ${specRel} exists and passes`,
+      `Playwright spec ${specFilePath} exists and passes`,
       `flow ${flow.id} coverage becomes "covered" after flowlens_ingest_results`,
       'video/trace evidence attached and visible in the flowlens viewer',
     ],
@@ -720,9 +720,35 @@ function testTaskFor(flow, nodes) {
   };
 }
 
+function writeIsolatedPlaywrightConfig(suite, specDir, configDir) {
+  fs.mkdirSync(specDir, { recursive: true });
+  const candidates = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.mjs', 'playwright.config.cjs'];
+  const baseConfig = candidates.map((name) => path.join(suite, name)).find((file) => fs.existsSync(file)) || null;
+  const target = path.join(configDir, 'playwright.isolated.config.ts');
+  const webServer = baseConfig
+    ? `base.webServer\n    ? (Array.isArray(base.webServer)\n        ? base.webServer.map((server) => ({ ...server, cwd: ${JSON.stringify(suite)} }))\n        : { ...base.webServer, cwd: ${JSON.stringify(suite)} })\n    : undefined`
+    : 'undefined';
+  const content = baseConfig
+    ? `import base from ${JSON.stringify(baseConfig)};\n\nexport default {\n  ...base,\n  testDir: ${JSON.stringify(specDir)},\n  webServer: ${webServer},\n};\n`
+    : `import { defineConfig, devices } from '@playwright/test';\n\nexport default defineConfig({\n  testDir: ${JSON.stringify(specDir)},\n  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],\n});\n`;
+  fs.writeFileSync(target, content, 'utf8');
+  return target;
+}
+
 export function build(options = {}) {
   const config = resolveConfig(resolveConfigPath(options));
   const flows = JSON.parse(fs.readFileSync(config.flowsPath, 'utf8'));
+  const testsConfig = config.config && config.config.tests && typeof config.config.tests === 'object'
+    ? config.config.tests
+    : {};
+  const testsMode = testsConfig.mode === 'isolated' ? 'isolated' : 'project';
+  const testsDirName = typeof testsConfig.dir === 'string' && testsConfig.dir ? testsConfig.dir : 'tests';
+  const specDir = testsMode === 'isolated'
+    ? path.resolve(config.dir, testsDirName)
+    : path.resolve(config.suite, testsDirName);
+  const isolatedConfigPath = testsMode === 'isolated'
+    ? writeIsolatedPlaywrightConfig(config.suite, specDir, config.dir)
+    : null;
   const labels = loadLabels(
     options.labelsPath ? path.resolve(options.labelsPath) : config.labelsPath
   );
@@ -974,7 +1000,7 @@ export function build(options = {}) {
     }
   }
   flowsOut.forEach((flow) => {
-    flow.testTask = testTaskFor(flow, nodesByFlow.get(flow.id) ?? []);
+    flow.testTask = testTaskFor(flow, nodesByFlow.get(flow.id) ?? [], specDir);
   });
 
   const graph = {
@@ -986,7 +1012,11 @@ export function build(options = {}) {
       reporterPath: path.join(HERE, 'reporter.mjs'),
       suiteRoot: config.suite,
       outputDir: out,
-      specDir: path.join(config.suite, 'tests'),
+      specDir,
+      specMode: testsMode,
+      playwrightConfig: isolatedConfigPath,
+      nodePath: testsMode === 'isolated' ? path.join(config.suite, 'node_modules') : null,
+      platform: process.platform,
     },
     flows: flowsOut,
     nodes,
