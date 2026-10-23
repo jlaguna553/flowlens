@@ -100,7 +100,10 @@ tests -> they run with the flowlens reporter -> `flowlens_ingest_results` ->
 `coverage` is one of `covered|partial|uncovered`; node `kind` is one of
 `interaction|backend|db|decision`. Node ids are unique within a flow; reuse the same
 `id`/`sharedKey` for shared steps, and backend/db nodes with the same `endpoint` merge
-automatically. `mermaid` is the flow's Mermaid sequence diagram. Nodes can also include
+automatically. `mermaid` is the flow's Mermaid sequence diagram. Set
+`tests: { mode: "project" | "isolated", dir: "tests" }` in `flowlens.config.json` to choose
+where specs are written; isolated mode uses a generated Playwright config in the data dir.
+Nodes can also include
 source metadata for Node Info: `file`, `line`, `component`, `selector` (interaction);
 `file`, `line`, `payloadExample` (backend); `table`, `dbFields` (db). Omit what cannot be
 verified. Coverage is derived from the Playwright report at build time, so run the reporter

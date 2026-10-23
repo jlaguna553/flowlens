@@ -126,6 +126,9 @@ of it shows up in your commits:
 | `--project <name>` | Project name. Defaults to the suite directory name. |
 | `--data-dir <dir>` | Data dir. Defaults to `~/.flowlens/projects` or `FLOWLENS_DATA_DIR`. |
 | `--agent opencode\|claude` | Agent used to map flows. Defaults to the agent that launched `init` (opencode/claude session), else the first installed one. |
+| `--model <provider/model>` | Preferred AI model. flowlens probes it and falls back to another reachable model if needed. |
+| `--tests-dir <dir>` | Project-relative folder for generated specs (default `tests`). |
+| `--isolated-tests` | Generate specs under `<dataDir>/<project>/tests` instead of the target repo. |
 | `--no-map` | Skip the automatic flow mapping. |
 | `--timeout <ms>` | Kill the mapping agent after this many milliseconds. |
 | `--force` | Overwrite an existing config / flows / AGENTS skeleton. |
@@ -389,10 +392,28 @@ The agent command is configured in `flowlens.config.json` (an `agent` block) or 
   "flows": "flows.json",
   "agent": {
     "command": "opencode",
-    "argsTemplate": ["run", "{{prompt}}"]
+    "argsTemplate": ["run", "--model", "opencode/deepseek-v4.1-flash-free", "{{prompt}}"]
+  },
+  "tests": {
+    "mode": "project",
+    "dir": "tests"
   }
 }
 ```
+
+`tests.mode` is `project` (specs inside the target repo) or `isolated` (specs under the
+flowlens data dir). `tests.dir` defaults to `tests`; in `isolated` mode it is resolved
+relative to the config directory. In isolated mode `build` also generates
+`playwright.isolated.config.ts` in the data dir, extends the project's Playwright config,
+and points `testDir` at the isolated folder. The generated command adds `NODE_PATH` so
+`@playwright/test` resolves from the project. Flow results, videos and traces always stay
+under `<dataDir>/<project>/out`.
+
+When `opencode` is used, `init`/`map`/`serve` check the model before launching it: they read
+the configured/`--model`/`FLOWLENS_MODEL` value, list `opencode models`, probe candidates
+with a tiny request, and persist the first reachable model in `agent.argsTemplate`. If none
+is reachable, the command fails with the list of attempted models and a hint to sign in or
+pass `--model`.
 
 `suite` is resolved relative to the **config file**, which lives outside the target repo
 (`<dataDir>/<project>/`). `flowlens init` writes it as an absolute path; if you create the
@@ -402,10 +423,22 @@ config by hand, use an absolute path. A relative path such as `"e2e"` points at
 Default when absent: `{ "command": "opencode", "argsTemplate": ["run", "{{prompt}}"] }`.
 Claude users: `{ "command": "claude", "argsTemplate": ["-p", "{{prompt}}"] }`.
 `{{prompt}}` is replaced with the generated prompt. An **array** `argsTemplate` is spawned
-with `shell: false`, so the prompt is a single argv element and nothing is shell-interpreted.
-A **string** `argsTemplate` is treated as a shell command line and the prompt is
-single-quote escaped before substitution. `agent.env` adds child environment variables;
+with `shell: false` through `cross-spawn`, so the prompt is a single argv element and
+nothing is shell-interpreted. A **string** `argsTemplate` is treated as a shell command line
+(POSIX only; Windows requires the array form). `agent.env` adds child environment variables;
 never store secrets there.
+
+### Windows
+
+The array form is required on Windows. flowlens resolves `opencode.cmd`/`claude.cmd`
+through `cross-spawn`, quotes absolute paths, and builds test commands as:
+
+```bat
+cd /d "C:\path\to\suite" && set "FLOWLENS_RUN_OUTPUT=C:\data\...\out\run.json" && npx playwright test ...
+```
+
+`--tests-dir` may be relative to the suite or absolute. Prefer `--isolated-tests` if the
+target repo is read-only or you do not want generated specs in its worktree.
 
 ## Reporter
 
@@ -443,9 +476,9 @@ Open the printed URL (the MCP `flowlens_serve` tool defaults to port `8020`; the
 `serve` defaults to `8017`). The viewer shows:
 
 - **Graph** of flows and nodes, colored by flow and by node kind (`Front`, `Back`, `BD`,
-  `Decision`), with three layouts: **Graphify** (original force graph), **Galaxia**
-  (constellation layout with starfield and flow clusters) and **Organigrama**
-  (top-down hierarchical tree).
+  `Decision`), with four layouts: **Graphify** (original force graph), **Galaxia**
+  (constellation layout with starfield and flow clusters), **Organigrama** (top-down
+  hierarchical tree) and **3D** (interactive Three.js view; drag to rotate, scroll to zoom).
 - **Collapsible, resizable sections**: Node Info, Evidence, Kinds, Flows. Each has its own
   scroll and a drag handle; the collapsed state is remembered.
 - **Node Info**: label, endpoint, kind, coverage, payload, response and neighbors, plus
@@ -519,8 +552,12 @@ and flowlens validates both before spawning. Common messages:
 **Automatic mapping failed.** `init` maps flows with the configured agent. If the agent is
 missing or the run fails, `init` keeps the scaffolded files and prints a warning. Retry with
 `flowlens map --project my-app` (add `--dry-run` to see the prompt first, `--agent claude`
-to switch agents). Use `init --no-map` to skip mapping entirely; `init` also skips it when
-`flows.json` already has flows.
+to switch agents, or `--model provider/model` to choose a model). Use `init --no-map` to
+skip mapping entirely; `init` also skips it when `flows.json` already has flows.
+
+**Model not reachable.** Run `opencode models`, then pass a model explicitly with
+`--model`, `FLOWLENS_MODEL`, or `agent.model`. `serve`/`mcp` also re-check the configured
+model and update the config if a fallback is needed.
 
 ## Privacy
 
