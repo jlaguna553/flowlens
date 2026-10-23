@@ -19,6 +19,7 @@
   },
   "scripts": {
     "build:viewer": "node scripts/build-viewer.mjs",
+    "test": "node --test test",
     "prepublishOnly": "npm run build:viewer"
   },
   "keywords": [

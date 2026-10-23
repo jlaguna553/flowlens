@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node 20 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-package-lock --no-audit --no-fund
+      - run: npm test
+      - run: node --check src/cli.mjs
+      - run: node --check src/build.mjs
+      - run: node --check src/map.mjs
+      - run: node --check src/agent.mjs
+      - run: node --check src/models.mjs
+      - run: node --check src/viewer/render.mjs
+      - run: npm pack --dry-run
