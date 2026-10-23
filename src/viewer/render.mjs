@@ -149,6 +149,12 @@ export const DEFAULT_VENDOR_HREF = "./vendor/vis-network.min.js";
 
 
 
+
+
+
+
+
+
 const FLOW_PALETTE = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"];
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
@@ -495,6 +501,10 @@ function sanitizeAgent(value         )                                          
     suiteRoot: sanitizeLabel(raw.suiteRoot ?? ""),
     outputDir: sanitizeLabel(raw.outputDir ?? ""),
     specDir: sanitizeLabel(raw.specDir ?? ""),
+    specMode: sanitizeLabel(raw.specMode ?? ""),
+    playwrightConfig: sanitizeLabel(raw.playwrightConfig ?? ""),
+    nodePath: sanitizeLabel(raw.nodePath ?? ""),
+    platform: sanitizeLabel(raw.platform ?? ""),
   };
 }
 
@@ -548,6 +558,7 @@ function buildEvidence(graph               ) {
         const attachmentsIn                       = Array.isArray(result.attachments) ? result.attachments : [];
         let videoId = safeArtifactId(timeline.videoArtifact, known);
         let traceId                = null;
+        let shotId                = null;
         for (const attachment of attachmentsIn) {
           if (!attachment) {
             continue;
@@ -563,6 +574,9 @@ function buildEvidence(graph               ) {
           if (name === "trace" && !traceId) {
             traceId = artifact;
           }
+          if ((name === "screenshot" || name === "image") && !shotId) {
+            shotId = artifact;
+          }
         }
 
         results.push({
@@ -570,6 +584,7 @@ function buildEvidence(graph               ) {
           videoBaseMs: toMillis(timeline.videoBaseMs),
           videoSrc: videoId ? artifactUrl(videoId) : null,
           traceSrc: traceId ? traceUrl(traceId) : null,
+          screenshotSrc: shotId ? artifactUrl(shotId) : null,
           entries,
         });
       }
@@ -618,8 +633,15 @@ function styles()         {
   .sidebar-divider:hover, .sidebar-divider:focus-visible, .sidebar-divider.dragging { background: #4E79A7; outline: none; }
   #sidebar { width: 420px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
   #theme-wrap, #search-wrap, #playback-bar, #kinds-legend-wrap, #stats { flex: 0 0 auto; }
-  #theme-wrap { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  #theme-wrap { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: center; }
   #theme-wrap button { flex: 1; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 4px 0; font-size: 11px; cursor: pointer; }
+  #lang-select { flex: 0 0 auto; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 4px 2px; font-size: 10px; cursor: pointer; }
+  #sidebar-hide { flex: 0 0 auto; background: var(--bg); color: var(--text-2); border: 1px solid var(--input-border); border-radius: 4px; padding: 4px 7px; font-size: 13px; line-height: 1; cursor: pointer; }
+  #sidebar-hide:hover, #lang-select:hover { color: var(--text); border-color: #4E79A7; }
+  #sidebar-show { position: fixed; top: 14px; right: 14px; z-index: 35; display: none; align-items: center; justify-content: center; width: 32px; height: 30px; background: var(--panel); color: var(--text-2); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.25); font-size: 15px; cursor: pointer; }
+  #sidebar-show:hover { color: var(--text); border-color: #4E79A7; }
+  body.sidebar-collapsed #sidebar, body.sidebar-collapsed #resize-handle { display: none; }
+  body.sidebar-collapsed #sidebar-show { display: inline-flex; }
   #theme-wrap button:hover { color: var(--text); }
   #theme-wrap button[aria-pressed="true"] { background: #4E79A7; border-color: #4E79A7; color: #fff; }
   #search-wrap { padding: 12px; border-bottom: 1px solid var(--border); }
@@ -635,6 +657,8 @@ function styles()         {
   #info-content .field b { color: var(--text); }
   #info-content .empty { color: var(--muted); font-style: italic; }
   #info-content .info-code { margin: 4px 0 6px; padding: 8px; max-height: 180px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  .node-shot-media { display: block; width: 100%; max-height: 170px; margin: 4px 0 8px; object-fit: contain; background: #000; border: 1px solid var(--border); border-radius: 6px; }
+  .node-modal-body .node-shot-media { max-height: 360px; }
   .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid var(--neighbor-border); }
   .neighbor-link:hover { background: var(--border); }
   #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
@@ -776,6 +800,9 @@ function styles()         {
   #view-switch button:hover { color: var(--text); }
   #view-switch button:focus-visible { outline: 2px solid #4E79A7; outline-offset: 1px; }
   #view-switch button[aria-pressed="true"] { background: #4E79A7; border-color: #4E79A7; color: #fff; }
+  #graph3d { position: fixed; z-index: 2; background: #05060f; }
+  #graph3d[hidden] { display: none; }
+  #graph3d canvas { display: block; }
   body.galaxy-view #graph { background-color: #05060f; background-image: radial-gradient(ellipse at 50% 45%, rgba(78,121,167,0.2), transparent 55%), radial-gradient(ellipse at 18% 72%, rgba(176,122,161,0.14), transparent 45%), radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.9), transparent), radial-gradient(1px 1px at 70px 120px, rgba(255,255,255,0.55), transparent), radial-gradient(1.5px 1.5px at 140px 60px, rgba(255,255,255,0.7), transparent); background-size: auto, auto, 220px 220px, 340px 340px, 480px 480px; }
   body.galaxy-view #graph canvas { position: relative; z-index: 1; }
   body.galaxy-view #view-switch { background: rgba(10,12,24,0.78); border-color: rgba(120,140,200,0.35); backdrop-filter: blur(8px); }
@@ -829,6 +856,111 @@ const LEGEND = ${legendJson};
 const KINDS = ${kindsJson};
 const EVIDENCE = ${evidenceJson};
 
+const LANG_KEY = 'flowlens-lang';
+const LANG_SELECT = document.getElementById('lang-select');
+const LANG_PAIRS = [
+  ['Light', 'Claro'], ['Dark', 'Oscuro'], ['System', 'Sistema'], ['Theme', 'Tema'], ['Language', 'Idioma'],
+  ['Search nodes...', 'Buscar nodos...'],
+  ['Node Info', 'Info del nodo'], ['Evidence', 'Evidencia'], ['Kinds', 'Tipos'], ['Flows', 'Flujos'],
+  ['Steps', 'Pasos'], ['Sequence', 'Secuencia'], ['Implement', 'Implementar'], ['Float', 'Flotar'],
+  ['Select All', 'Seleccionar todo'], ['All', 'Todos'], ['Covered', 'Cubiertos'], ['Partial', 'Parciales'], ['Uncovered', 'Sin cubrir'], ['Clear', 'Limpiar'],
+  ['Galaxy', 'Galaxia'], ['Org chart', 'Organigrama'],
+  ['Hide panel', 'Ocultar panel'], ['Show panel', 'Mostrar panel'],
+  ['Max', 'Máx'], ['Restore', 'Restaurar'], ['Dock', 'Anclar'], ['Close', 'Cerrar'], ['Full screen', 'Pantalla completa'], ['Reset', 'Reiniciar'],
+  ['Click para ampliar', 'Click to expand'], ['Click para maximizar', 'Click to maximize'], ['Click para ver el diagrama completo', 'Click to open the full diagram'],
+  ['Shared node', 'Nodo compartido'], ['Test frame', 'Frame del test'], ['Payload example:', 'Ejemplo de payload:'],
+  ['Click a node to load evidence', 'Haz click en un nodo para cargar su evidencia'], ['Click a node to inspect it', 'Haz click en un nodo para inspeccionarlo'],
+  ['sin datos del flujo', 'no flow data'], ['sin cobertura', 'no coverage'], ['sin video', 'no video'], ['sin trace', 'no trace'], ['sin pasos', 'no steps'], ['sin tareas de test', 'no test tasks'],
+  ['Sin datos del flujo', 'No flow data'], ['Sin cobertura', 'No coverage'], ['Sin video', 'No video'], ['Sin trace', 'No trace'], ['Sin pasos', 'No steps'], ['Sin tareas de test', 'No test tasks'],
+  ['Sin diagrama Mermaid. Vuelve a mapear los flujos para generarlo.', 'No Mermaid diagram. Re-map the flows to generate it.'],
+  ['Sin diagrama Mermaid.', 'No Mermaid diagram.'],
+  ['Mermaid no está disponible.', 'Mermaid is not available.'],
+  ['Error al renderizar Mermaid:', 'Error rendering Mermaid:'],
+  ['listo para ejecutar', 'ready to run'], ['running', 'running'], ['failed', 'failed'], ['done ok', 'done ok'], ['Ejecutando…', 'Running…'], ['Ejecutar agente', 'Run agent'],
+  ['Implementar test', 'Implement test'], ['Spec sugerido:', 'Suggested spec:'], ['Comando a ejecutar', 'Command to run'], ['Criterios de aceptación', 'Acceptance criteria'], ['Nodos sin cubrir', 'Uncovered nodes'],
+  ['Coverage: Covered', 'Cobertura: Cubiertos'], ['Coverage: Partial', 'Cobertura: Parciales'], ['Coverage: Uncovered', 'Cobertura: Sin cubrir'],
+];
+const PREFIX_PAIRS = [
+  ['Kind: ', 'Tipo: '], ['Flow: ', 'Flujo: '], ['Component: ', 'Componente: '], ['Source: ', 'Fuente: '],
+  ['Payload example:', 'Ejemplo de payload:'], ['Table: ', 'Tabla: '], ['Fields: ', 'Campos: '], ['Shared by: ', 'Compartido por: '],
+  ['Coverage: Covered', 'Cobertura: Cubiertos'], ['Coverage: Partial', 'Cobertura: Parciales'], ['Coverage: Uncovered', 'Cobertura: Sin cubrir'], ['Coverage: ', 'Cobertura: '],
+  ['Degree: ', 'Grado: '], ['Neighbors (', 'Vecinos ('], ['Respuesta: ', 'Response: '],
+  ['Spec sugerido: ', 'Suggested spec: '], ['Evidence · ', 'Evidencia · '], ['Secuencia · ', 'Sequence · '],
+  ['Arista compartida por ', 'Shared edge by '], [' flujos · Click para maximizar', ' flows · Click to maximize'],
+];
+const I18N_MAP = { en: new Map(), es: new Map() };
+const I18N_PREFIX = { en: [], es: [] };
+LANG_PAIRS.forEach(function (pair) {
+  if (pair[0] !== pair[1]) {
+    I18N_MAP.en.set(pair[1], pair[0]);
+    I18N_MAP.es.set(pair[0], pair[1]);
+  }
+});
+PREFIX_PAIRS.forEach(function (pair) {
+  I18N_PREFIX.en.push([pair[1], pair[0]]);
+  I18N_PREFIX.es.push([pair[0], pair[1]]);
+});
+const I18N_SKIP = '.legend-label, .legend-id, .search-item, .ev-flow, .node-preview-title, .edge-preview-title, .node-modal-title, .neighbor-link, pre, code, svg, .ev-cmd, .ev-run-log';
+let currentLang = 'en';
+try {
+  const savedLang = localStorage.getItem(LANG_KEY);
+  if (savedLang === 'en' || savedLang === 'es') currentLang = savedLang;
+  else currentLang = String(navigator.language || '').toLowerCase().indexOf('es') === 0 ? 'es' : 'en';
+} catch (e) {
+  currentLang = 'en';
+}
+function translateString(value, map, prefixes) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return value;
+  if (map.has(trimmed)) return value.replace(trimmed, map.get(trimmed));
+  for (const prefix of prefixes) {
+    if (trimmed.indexOf(prefix[0]) === 0) return value.replace(prefix[0], prefix[1]);
+  }
+  return value;
+}
+function translateDom(root) {
+  if (!root) return;
+  const map = I18N_MAP[currentLang];
+  const prefixes = I18N_PREFIX[currentLang];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const updates = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    const parent = node.parentElement;
+    if (!parent || parent.closest(I18N_SKIP)) continue;
+    const next = translateString(node.nodeValue, map, prefixes);
+    if (next !== node.nodeValue) updates.push([node, next]);
+  }
+  updates.forEach(function (entry) { entry[0].nodeValue = entry[1]; });
+  root.querySelectorAll('[placeholder],[title],[aria-label]').forEach(function (element) {
+    if (element.closest(I18N_SKIP)) return;
+    ['placeholder', 'title', 'aria-label'].forEach(function (attr) {
+      const value = element.getAttribute(attr);
+      if (!value) return;
+      const next = translateString(value, map, prefixes);
+      if (next !== value) element.setAttribute(attr, next);
+    });
+  });
+}
+let i18nScheduled = false;
+const i18nObserver = new MutationObserver(function () {
+  if (i18nScheduled) return;
+  i18nScheduled = true;
+  requestAnimationFrame(function () {
+    i18nScheduled = false;
+    translateDom(document.body);
+  });
+});
+i18nObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+function applyLanguage(lang) {
+  currentLang = lang === 'es' ? 'es' : 'en';
+  try { localStorage.setItem(LANG_KEY, currentLang); } catch (e) {}
+  document.documentElement.lang = currentLang;
+  if (LANG_SELECT) LANG_SELECT.value = currentLang;
+  translateDom(document.body);
+}
+if (LANG_SELECT) LANG_SELECT.addEventListener('change', function () { applyLanguage(LANG_SELECT.value); });
+
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/\\u003c/g, '&lt;').replace(/\\u003e/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -869,6 +1001,9 @@ const themeMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: li
 let themeLabelColor = '#ffffff';
 let viewMode = 'original';
 let viewAnimationFrame = null;
+const graph3dEl = document.getElementById('graph3d');
+let view3dGraph = null;
+let view3dFocusedFlow = null;
 function themePref() {
   let p = null;
   try { p = localStorage.getItem(THEME_KEY); } catch (e) {}
@@ -1174,6 +1309,49 @@ function coverageText(node) {
   if (node.coverage === 'partial') return 'Partial';
   return 'Uncovered';
 }
+function nodeTestMoment(node) {
+  if (!node || node.kind !== 'interaction') return null;
+  const flows = nodeFlows(node);
+  const preferred = focusedFlowId && flows.indexOf(focusedFlowId) !== -1 ? focusedFlowId : null;
+  const ordered = preferred ? [preferred].concat(flows.filter(function (flow) { return flow !== preferred; })) : flows;
+  for (const flowId of ordered) {
+    const flow = EVIDENCE_BY_FLOW[String(flowId)];
+    if (!flow || !Array.isArray(flow.tests)) continue;
+    for (const test of flow.tests) {
+      for (const result of test.results || []) {
+        const entries = Array.isArray(result.entries) ? result.entries : [];
+        const entry = entries.find(function (candidate) {
+          return String(candidate.node) === String(node.id);
+        });
+        if (entry && result.videoSrc) {
+          const start = Number(entry.startMs) || 0;
+          return { kind: 'video', src: result.videoSrc, time: Math.max(0, start / 1000) };
+        }
+        if (result.screenshotSrc) {
+          return { kind: 'image', src: result.screenshotSrc, time: 0 };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function hydrateNodeMedia(root) {
+  if (!root) return;
+  root.querySelectorAll('video[data-shot-time]').forEach(function (video) {
+    const time = Number(video.dataset.shotTime) || 0;
+    const seek = function () {
+      try {
+        video.currentTime = video.duration ? Math.min(time, video.duration) : time;
+        video.pause();
+      } catch (e) {}
+    };
+    if (video.readyState >= 1) seek();
+    else video.addEventListener('loadedmetadata', seek, { once: true });
+    video.addEventListener('seeked', function () { try { video.pause(); } catch (e) {} }, { once: true });
+  });
+}
+
 function nodeInfoHtml(n) {
   if (!n) return '';
   const neighborIds = network.getConnectedNodes(n.id);
@@ -1208,6 +1386,15 @@ function nodeInfoHtml(n) {
   } else if (sourceLine) {
     html += '<div class="field"><b>Source:</b> ' + esc(sourceLine) + '</div>';
   }
+  const shot = nodeTestMoment(n);
+  if (shot) {
+    html += '<div class="field"><b>Test frame</b></div>';
+    if (shot.kind === 'image') {
+      html += '<img class="node-shot-media" src="' + esc(shot.src) + '" alt="Test frame" loading="lazy">';
+    } else {
+      html += '<video class="node-shot-media" src="' + esc(shot.src) + '" muted playsinline preload="auto" data-shot-time="' + shot.time + '" aria-label="Test frame"></video>';
+    }
+  }
   const cov = coverageText(n);
   if (cov) html += '<div class="field">Coverage: ' + esc(cov) + '</div>';
   if (n.payload) html += '<div class="field">Payload: ' + esc(n.payload) + '</div>';
@@ -1230,6 +1417,7 @@ function showInfo(nodeId) {
   const n = nodesDS.get(nodeId);
   if (!n) return;
   infoContent.innerHTML = nodeInfoHtml(n);
+  hydrateNodeMedia(infoContent);
 }
 function focusNode(nodeId) {
   network.selectNodes([nodeId]);
@@ -1591,6 +1779,7 @@ function applyFlowFocus() {
   if (updates.length) edgesDS.update(updates);
   updateLegendFocus();
   network.redraw();
+  view3dApplyColors();
 }
 function galaxyHash(text) {
   const value = String(text);
@@ -1756,12 +1945,193 @@ function animateViewPositions(targets, duration) {
   viewAnimationFrame = requestAnimationFrame(frame);
 }
 
+function build3dData() {
+  return {
+    nodes: RAW_NODES.map(function (node) { return Object.assign({}, node); }),
+    links: RAW_EDGES.map(function (edge, index) {
+      return { id: index, source: edge.from, target: edge.to, flows: edge.flows };
+    }),
+  };
+}
+
+const graphElFor3d = document.getElementById('graph');
+if (graphElFor3d && typeof ResizeObserver === 'function') {
+  const resize3dObserver = new ResizeObserver(function () {
+    if (viewMode !== '3d') return;
+    position3dContainer();
+    if (view3dGraph) view3dGraph.width(graph3dEl.clientWidth).height(graph3dEl.clientHeight);
+  });
+  resize3dObserver.observe(graphElFor3d);
+}
+
+function position3dContainer() {
+  if (!graph3dEl) return;
+  const graphEl = document.getElementById('graph');
+  if (!graphEl) return;
+  const rect = graphEl.getBoundingClientRect();
+  graph3dEl.style.left = rect.left + 'px';
+  graph3dEl.style.top = rect.top + 'px';
+  graph3dEl.style.width = rect.width + 'px';
+  graph3dEl.style.height = rect.height + 'px';
+}
+
+function view3dNodeColor(node) {
+  if (!node) return '#ffffff';
+  const base = node.shared ? '#ffd166' : (node.color && node.color.background) || '#ffffff';
+  if (!view3dFocusedFlow) return base;
+  return nodeFlows(node).indexOf(view3dFocusedFlow) !== -1 ? base : '#2a3048';
+}
+
+function view3dLinkColor(link) {
+  const base = edgeGalaxyColor(link);
+  if (!view3dFocusedFlow) return base;
+  const flows = Array.isArray(link.flows) ? link.flows : [];
+  return flows.indexOf(view3dFocusedFlow) !== -1 ? base : '#3a4055';
+}
+
+function view3dApplyColors() {
+  view3dFocusedFlow = focusedFlowId || null;
+  if (!view3dGraph) return;
+  view3dGraph
+    .nodeColor(function (node) { return view3dNodeColor(node); })
+    .linkColor(function (link) { return view3dLinkColor(link); })
+    .linkWidth(function (link) {
+      return view3dFocusedFlow && Array.isArray(link.flows) && link.flows.indexOf(view3dFocusedFlow) !== -1 ? 2.1 : 1.15;
+    });
+  view3dGraph.refresh();
+}
+
+function focus3dFlow(flowId) {
+  if (!view3dGraph || flowId === null || flowId === undefined || flowId === '') return;
+  const nodes = view3dGraph.graphData().nodes.filter(function (node) {
+    return nodeFlows(node).indexOf(flowId) !== -1;
+  });
+  if (!nodes.length) return;
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  nodes.forEach(function (node) {
+    cx += Number(node.x) || 0;
+    cy += Number(node.y) || 0;
+    cz += Number(node.z) || 0;
+  });
+  cx /= nodes.length;
+  cy /= nodes.length;
+  cz /= nodes.length;
+  let spread = 0;
+  nodes.forEach(function (node) {
+    const dx = (Number(node.x) || 0) - cx;
+    const dy = (Number(node.y) || 0) - cy;
+    const dz = (Number(node.z) || 0) - cz;
+    spread = Math.max(spread, Math.sqrt(dx * dx + dy * dy + dz * dz));
+  });
+  const distance = Math.max(140, spread * 2.5);
+  view3dGraph.cameraPosition(
+    { x: cx + distance * 0.35, y: cy + distance * 0.22, z: cz + distance },
+    { x: cx, y: cy, z: cz },
+    900
+  );
+}
+
+function select3dFlow(flowId) {
+  if (flowId === null || flowId === undefined || flowId === '') return;
+  focusedFlowId = String(flowId);
+  applyFlowFocus();
+  updateLegendFocus();
+  const flow = setEvidenceFlow(String(flowId));
+  if (flow && flow.mermaid) setEvidenceTab('sequence');
+  else if (flowNeedsTest(flow)) setEvidenceTab('implement');
+  focus3dFlow(focusedFlowId);
+}
+
+function ensure3dGraph() {
+  if (typeof ForceGraph3D === 'undefined') {
+    if (graph3dEl) {
+      graph3dEl.innerHTML = '<div class="ev-seq-empty" style="padding:24px">La vista 3D no está disponible: falta el bundle vendorizado.</div>';
+    }
+    return null;
+  }
+  if (!view3dGraph) {
+    view3dGraph = ForceGraph3D()(graph3dEl)
+      .backgroundColor('#05060f')
+      .showNavInfo(false)
+      .nodeLabel('')
+      .nodeRelSize(4)
+      .nodeOpacity(0.95)
+      .nodeColor(view3dNodeColor)
+      .nodeVal(function (node) {
+        return Math.max(1, galaxyStarWeight(node || {}));
+      })
+      .linkColor(view3dLinkColor)
+      .linkOpacity(0.4)
+      .linkWidth(function (link) {
+        return view3dFocusedFlow && Array.isArray(link.flows) && link.flows.indexOf(view3dFocusedFlow) !== -1 ? 2.1 : 1.15;
+      })
+      .linkDirectionalArrowLength(3)
+      .linkDirectionalArrowRelPos(1)
+      .onNodeHover(function (node) {
+        if (node) {
+          hideEdgePreviewNow();
+          showNodePreview(node.id);
+        } else {
+          scheduleHideNodePreview();
+        }
+      })
+      .onLinkHover(function (link) {
+        if (link) {
+          hideNodePreviewNow();
+          showEdgePreview(link.id);
+        } else {
+          scheduleHideEdgePreview();
+        }
+      })
+      .onNodeClick(function (node) {
+        const flows = node ? nodeFlows(node) : [];
+        const flowId = focusedFlowId && flows.indexOf(focusedFlowId) !== -1
+          ? focusedFlowId
+          : (node && node.flow !== undefined && node.flow !== null ? node.flow : flows[0]);
+        select3dFlow(flowId);
+        hideNodePreviewNow();
+      })
+      .onLinkClick(function (link) {
+        const target = edgeTargetFor(link.id);
+        if (target) select3dFlow(target.flowId);
+        hideEdgePreviewNow();
+      })
+      .onBackgroundClick(function () {
+        hideNodePreviewNow();
+        hideEdgePreviewNow();
+      });
+  }
+  position3dContainer();
+  const width = (graph3dEl && graph3dEl.clientWidth) || document.getElementById('graph').clientWidth;
+  const height = (graph3dEl && graph3dEl.clientHeight) || document.getElementById('graph').clientHeight;
+  view3dGraph.width(width).height(height);
+  view3dGraph.graphData(build3dData());
+  view3dFocusedFlow = focusedFlowId || null;
+  view3dApplyColors();
+  setTimeout(function () { if (viewMode === '3d') view3dApplyColors(); }, 180);
+  view3dGraph.resumeAnimation();
+  setTimeout(function () {
+    if (viewMode === '3d' && view3dGraph) view3dGraph.zoomToFit(800, 70);
+  }, 500);
+  return view3dGraph;
+}
+
 function applyViewMode(mode) {
-  viewMode = mode === 'galaxy' || mode === 'organigram' ? mode : 'original';
+  viewMode = mode === 'galaxy' || mode === 'organigram' || mode === '3d' ? mode : 'original';
   stopViewAnimation();
   try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) {}
   document.body.classList.toggle('galaxy-view', viewMode === 'galaxy');
+  document.body.classList.toggle('view-3d', viewMode === '3d');
+  if (graph3dEl) graph3dEl.hidden = viewMode !== '3d';
   updateViewButtons();
+  if (viewMode === '3d') {
+    network.stopSimulation();
+    ensure3dGraph();
+    return;
+  }
+  if (view3dGraph) view3dGraph.pauseAnimation();
   if (viewMode === 'galaxy') {
     network.stopSimulation();
     network.setOptions({ physics: { enabled: false } });
@@ -1854,6 +2224,7 @@ function clearFlowFocus() {
   focusedFlowId = null;
   applyFlowFocus();
   network.fit({ animation: true });
+  if (viewMode === '3d' && view3dGraph) view3dGraph.zoomToFit(800, 70);
 }
 function setFlowFocus(flow, zoom) {
   if (flow === null || flow === undefined || flow === '' || flow === focusedFlowId) {
@@ -1864,6 +2235,9 @@ function setFlowFocus(flow, zoom) {
   applyFlowFocus();
   const ids = flowNodeIds(flow);
   if (zoom && ids.length) network.fit({ nodes: ids, animation: true });
+  if (viewMode === '3d' && view3dGraph && ids.length) {
+    focus3dFlow(flow);
+  }
   const flowData = setEvidenceFlow(String(flow));
   if (flowData && flowData.mermaid) {
     setEvidenceTab('sequence');
@@ -2501,13 +2875,52 @@ function renderStepsTab(result) {
   highlightActiveStep(idx >= 0 ? idx : null);
 }
 
+function cliQuote(value, platform) {
+  const text = String(value ?? '');
+  if (platform === 'win32') return '"' + text.replace(/"/g, '""') + '"';
+  if (!text) return "''";
+  return "'" + text.replace(/'/g, "'\\''") + "'";
+}
+
+function trimTrailingSeparators(value) {
+  const separator = String.fromCharCode(92);
+  let text = String(value ?? '');
+  while (text.length && (text.charAt(text.length - 1) === '/' || text.charAt(text.length - 1) === separator)) {
+    text = text.slice(0, -1);
+  }
+  return text;
+}
+
 function buildTestCommand(task) {
   const agent = EVIDENCE.agent || {};
+  const platform = agent.platform || (navigator.userAgent.indexOf('Windows') !== -1 ? 'win32' : 'linux');
   const suiteRoot = agent.suiteRoot || '.';
   const outputDir = agent.outputDir || 'out';
   const reporterPath = agent.reporterPath || '';
-  const spec = task && task.suggestedSpecFile ? task.suggestedSpecFile : 'e2e/<flow>.spec.ts';
-  return 'cd ' + suiteRoot + ' && FLOWLENS_RUN_OUTPUT=' + outputDir + '/run.json npx playwright test ' + spec + ' --reporter=' + reporterPath + ' --output=' + outputDir + '/test-results';
+  let spec = task && task.suggestedSpecFile ? task.suggestedSpecFile : 'e2e/<flow>.spec.ts';
+  const separator = String.fromCharCode(92);
+  const isAbsoluteSpec =
+    spec.charAt(0) === '/' ||
+    spec.charAt(0) === separator ||
+    (spec.length > 2 && spec.charAt(1) === ':' && (spec.charAt(2) === '/' || spec.charAt(2) === separator));
+  if (!isAbsoluteSpec) {
+    spec = trimTrailingSeparators(suiteRoot) + '/' + spec;
+  }
+  const runPath = trimTrailingSeparators(outputDir) + '/run.json';
+  const testResults = trimTrailingSeparators(outputDir) + '/test-results';
+  const playwrightConfig = agent.playwrightConfig || '';
+  const nodePath = agent.nodePath || '';
+  const configArg = playwrightConfig ? ' --config=' + cliQuote(playwrightConfig, platform) : '';
+  if (platform === 'win32') {
+    const env = [];
+    if (nodePath) env.push('set "NODE_PATH=' + nodePath + '"');
+    env.push('set "FLOWLENS_RUN_OUTPUT=' + runPath + '"');
+    return 'cd /d ' + cliQuote(suiteRoot, 'win32') + ' && ' + env.join(' && ') + ' && npx playwright test ' + cliQuote(spec, 'win32') + configArg + ' --reporter=' + cliQuote(reporterPath, 'win32') + ' --output=' + cliQuote(testResults, 'win32');
+  }
+  const env = [];
+  if (nodePath) env.push('NODE_PATH=' + cliQuote(nodePath, platform));
+  env.push('FLOWLENS_RUN_OUTPUT=' + cliQuote(runPath, platform));
+  return 'cd ' + cliQuote(suiteRoot, platform) + ' && ' + env.join(' ') + ' npx playwright test ' + cliQuote(spec, platform) + configArg + ' --reporter=' + cliQuote(reporterPath, platform) + ' --output=' + cliQuote(testResults, platform);
 }
 
 function appendImplList(parent, heading, items) {
@@ -3053,7 +3466,6 @@ if (flowPreviewCanvas) {
   });
 }
 window.addEventListener('resize', hideFlowPreviewNow);
-window.addEventListener('scroll', hideFlowPreviewNow, true);
 
 function positionHoverCard(element, width, height) {
   if (!element) return;
@@ -3089,7 +3501,7 @@ function showNodePreview(nodeId) {
   }
   nodePreviewNodeId = nodeId;
   if (nodePreviewTitleEl) nodePreviewTitleEl.textContent = node.label || String(nodeId);
-  if (nodePreviewBodyEl) nodePreviewBodyEl.innerHTML = nodeInfoHtml(node);
+  if (nodePreviewBodyEl) { nodePreviewBodyEl.innerHTML = nodeInfoHtml(node); hydrateNodeMedia(nodePreviewBodyEl); }
   nodePreviewEl.hidden = false;
   positionHoverCard(nodePreviewEl, 320, 300);
 }
@@ -3102,7 +3514,7 @@ function openNodeInfoModal(nodeId) {
     nodeModalTitleEl.textContent = node.label || String(nodeId);
     nodeModalTitleEl.title = nodeModalTitleEl.textContent;
   }
-  if (nodeModalBodyEl) nodeModalBodyEl.innerHTML = nodeInfoHtml(node);
+  if (nodeModalBodyEl) { nodeModalBodyEl.innerHTML = nodeInfoHtml(node); hydrateNodeMedia(nodeModalBodyEl); }
   hideNodePreviewNow();
   hideEdgePreviewNow();
   nodeModalEl.hidden = false;
@@ -3250,8 +3662,20 @@ window.addEventListener('keydown', function (event) {
 window.addEventListener('resize', function () {
   hideNodePreviewNow();
   hideEdgePreviewNow();
+  if (viewMode === '3d' && view3dGraph && graph3dEl) {
+    position3dContainer();
+    view3dGraph.width(graph3dEl.clientWidth).height(graph3dEl.clientHeight);
+  }
 });
-window.addEventListener('scroll', function () {
+window.addEventListener('scroll', function (event) {
+  const target = event.target;
+  const insidePreview = target && target.nodeType && (
+    (flowPreviewEl && flowPreviewEl.contains(target)) ||
+    (edgePreviewEl && edgePreviewEl.contains(target)) ||
+    (nodePreviewEl && nodePreviewEl.contains(target))
+  );
+  if (insidePreview) return;
+  hideFlowPreviewNow();
   hideNodePreviewNow();
   hideEdgePreviewNow();
 }, true);
@@ -3260,6 +3684,8 @@ if (window.flowlensViewer) {
   window.flowlensViewer.showNodePreview = showNodePreview;
   window.flowlensViewer.openNodeInfo = openNodeInfoModal;
   window.flowlensViewer.showEdgePreview = showEdgePreview;
+  window.flowlensViewer.select3dFlow = select3dFlow;
+
 }
 
 function renderSequenceTab(flow) {
@@ -3806,13 +4232,36 @@ if (playSpeed) playSpeed.addEventListener('change', function () {
   if (videoHasSrc()) evVideo.playbackRate = playback.speed;
 });
 
+const SIDEBAR_COLLAPSED_KEY = 'flowlens-sidebar-collapsed';
+const sidebarHideBtn = document.getElementById('sidebar-hide');
+const sidebarShowBtn = document.getElementById('sidebar-show');
+function applySidebarCollapsed(collapsed) {
+  const value = !!collapsed;
+  document.body.classList.toggle('sidebar-collapsed', value);
+  try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? '1' : '0'); } catch (e) {}
+  if (sidebarShowBtn) sidebarShowBtn.hidden = !value;
+  if (sidebarHideBtn) sidebarHideBtn.setAttribute('aria-expanded', String(!value));
+  resizeGraph();
+  network.redraw();
+  if (viewMode === '3d') {
+    position3dContainer();
+    if (view3dGraph && graph3dEl) view3dGraph.width(graph3dEl.clientWidth).height(graph3dEl.clientHeight);
+  }
+}
+if (sidebarHideBtn) sidebarHideBtn.addEventListener('click', function () { applySidebarCollapsed(true); });
+if (sidebarShowBtn) sidebarShowBtn.addEventListener('click', function () { applySidebarCollapsed(false); });
+try {
+  if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') applySidebarCollapsed(true);
+} catch (e) {}
+
 updateViewButtons();
 try {
   const savedView = localStorage.getItem(VIEW_KEY);
-  if (savedView === 'galaxy' || savedView === 'organigram') applyViewMode(savedView);
+  if (savedView === 'galaxy' || savedView === 'organigram' || savedView === '3d') applyViewMode(savedView);
 } catch (e) {}
 setEvidenceTab('video');
 emptyInfo();
+applyLanguage(currentLang);
 </script>`;
 }
 
@@ -3826,6 +4275,7 @@ export function renderHtml(graph                = { nodes: [] }, options        
   const evidenceJson = jsSafe(evidence);
   const vendorHref = escHtml(options.vendorHref ?? DEFAULT_VENDOR_HREF);
   const mermaidHref = escHtml(options.mermaidHref ?? "./vendor/mermaid.min.js");
+  const graph3dHref = escHtml(options.graph3dHref ?? "./vendor/3d-force-graph.min.js");
   const title = escHtml(sanitizeLabel(options.title ?? "flowlens"));
   const stats = payload.nodes.length + " nodes &middot; " + payload.edges.length + " edges &middot; " + payload.legend.length + " flows";
 
@@ -3837,15 +4287,19 @@ export function renderHtml(graph                = { nodes: [] }, options        
 <title>flowlens - ${title}</title>
 <script src="${vendorHref}"></script>
 <script src="${mermaidHref}"></script>
+<script src="${graph3dHref}"></script>
 ${styles()}
 ${themeInitScript()}
 </head>
 <body>
 <div id="graph"></div>
+<div id="graph3d" hidden></div>
+<button type="button" id="sidebar-show" title="Show panel" aria-label="Show panel" hidden>&raquo;</button>
 <div id="view-switch" role="group" aria-label="Graph view">
   <button type="button" data-view-mode="original" aria-pressed="true" title="Graphify original">Graphify</button>
   <button type="button" data-view-mode="galaxy" aria-pressed="false" title="Estrellas más grandes = nodos más compartidos o conectados">Galaxia</button>
   <button type="button" data-view-mode="organigram" aria-pressed="false" title="Vista jerárquica tipo organigrama">Organigrama</button>
+  <button type="button" data-view-mode="3d" aria-pressed="false" title="Vista 3D interactiva">3D</button>
 </div>
 <div id="resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
 <div id="sidebar">
@@ -3853,6 +4307,11 @@ ${themeInitScript()}
     <button type="button" data-theme-choice="light">Light</button>
     <button type="button" data-theme-choice="dark">Dark</button>
     <button type="button" data-theme-choice="system">System</button>
+    <select id="lang-select" aria-label="Language" title="Language">
+      <option value="en">EN</option>
+      <option value="es">ES</option>
+    </select>
+    <button type="button" id="sidebar-hide" title="Hide panel" aria-label="Hide panel">&laquo;</button>
   </div>
   <div id="search-wrap">
     <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
