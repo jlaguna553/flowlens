@@ -40,5 +40,8 @@
   "homepage": "https://github.com/jlaguna553/flowlens#readme",
   "bugs": {
     "url": "https://github.com/jlaguna553/flowlens/issues"
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
   }
 }

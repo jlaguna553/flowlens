@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import spawn from 'cross-spawn';
 import { randomUUID } from 'node:crypto';
 import { resolveConfigPath } from './paths.mjs';
+import { withModel } from './models.mjs';
 
 export const DEFAULT_AGENT = {
   command: 'opencode',
@@ -55,12 +56,16 @@ export function resolveAgentConfig(config, configDir) {
   const resolved = doc && typeof doc === 'object' ? doc : {};
   const command =
     typeof resolved.command === 'string' && resolved.command ? resolved.command : DEFAULT_AGENT.command;
-  const argsTemplate =
+  const baseTemplate =
     typeof resolved.argsTemplate === 'string' && resolved.argsTemplate
       ? resolved.argsTemplate
       : Array.isArray(resolved.argsTemplate) && resolved.argsTemplate.length
         ? resolved.argsTemplate.map((entry) => String(entry))
         : DEFAULT_AGENT.argsTemplate.slice();
+  const argsTemplate =
+    typeof resolved.model === 'string' && resolved.model
+      ? withModel(baseTemplate, resolved.model)
+      : baseTemplate;
   const env =
     resolved.env && typeof resolved.env === 'object' && !Array.isArray(resolved.env)
       ? { ...resolved.env }
@@ -88,8 +93,11 @@ export function taskForFlow(graph, flowId) {
   const suiteRoot = agentInfo.suiteRoot ?? '.';
   const outputDir = agentInfo.outputDir ?? '.';
   const testTask = flow.testTask && typeof flow.testTask === 'object' ? flow.testTask : {};
+  const platform = agentInfo.platform ?? process.platform;
   const specName = testTask.suggestedSpecFile ?? `${slug(flow.title || flow.id)}.spec.ts`;
-  const specRel = path.join('tests', path.basename(specName));
+  const specDir = agentInfo.specDir ?? path.join(suiteRoot, 'tests');
+  const specFilePath = path.isAbsolute(specName) ? specName : path.join(specDir, path.basename(specName));
+  const specRel = path.relative(suiteRoot, specFilePath) || path.basename(specFilePath);
   const nodes =
     Array.isArray(testTask.nodes) && testTask.nodes.length
       ? testTask.nodes
@@ -99,14 +107,21 @@ export function taskForFlow(graph, flowId) {
   const reporterPath = agentInfo.reporterPath ?? null;
   const runPath = path.join(outputDir, 'run.json');
   const testResults = path.join(outputDir, 'test-results');
-  const reporterHint =
-    `cd ${suiteRoot} && FLOWLENS_RUN_OUTPUT=${runPath} ` +
-    `npx playwright test ${specRel} --reporter=${reporterPath} --output=${testResults}`;
+  const reporterHint = reporterHintFor({
+    platform,
+    suiteRoot,
+    runPath,
+    specPath: specFilePath,
+    reporterPath,
+    testResults,
+    playwrightConfig: agentInfo.playwrightConfig || null,
+    nodePath: agentInfo.nodePath || null,
+  });
   const acceptance =
     Array.isArray(testTask.acceptance) && testTask.acceptance.length
       ? testTask.acceptance
       : [
-          `Playwright spec ${specRel} exists and passes`,
+          `Playwright spec ${specFilePath} exists and passes`,
           `flow ${flow.id} coverage becomes "covered" after flowlens_ingest_results`,
           'video/trace evidence attached and visible in the flowlens viewer',
         ];
@@ -118,7 +133,7 @@ export function taskForFlow(graph, flowId) {
     actors: Array.isArray(flow.actors) ? flow.actors : [],
     suiteRoot,
     suggestedSpecFile: specRel,
-    specFilePath: path.join(suiteRoot, specRel),
+    specFilePath,
     reporterHint,
     outputPath: runPath,
     reporterPath,
@@ -176,11 +191,37 @@ export function buildImplementPrompt(task, agentInfo = {}) {
   return lines.join('\n');
 }
 
-export function shellQuote(value) {
+export function shellQuote(value, platform = process.platform) {
   const text = String(value ?? '');
+  if (platform === 'win32') {
+    if (text === '') return '""';
+    if (!/[\s"&|<>^]/.test(text)) return text;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
   if (text === '') return "''";
   if (SAFE_SHELL_ARG.test(text)) return text;
   return `'${text.replace(/'/g, "'\\''")}'`;
+}
+
+function reporterHintFor(options) {
+  const platform = options.platform || process.platform;
+  const suite = shellQuote(options.suiteRoot, platform);
+  const runPath = shellQuote(options.runPath, platform);
+  const spec = shellQuote(options.specPath, platform);
+  const reporter = shellQuote(options.reporterPath, platform);
+  const output = shellQuote(options.testResults, platform);
+  const config = options.playwrightConfig ? shellQuote(options.playwrightConfig, platform) : null;
+  const configArg = config ? ` --config=${config}` : '';
+  if (platform === 'win32') {
+    const env = [];
+    if (options.nodePath) env.push(`set "NODE_PATH=${options.nodePath}"`);
+    env.push(`set "FLOWLENS_RUN_OUTPUT=${options.runPath}"`);
+    return `cd /d ${suite} && ${env.join(' && ')} && npx playwright test ${spec}${configArg} --reporter=${reporter} --output=${output}`;
+  }
+  const env = [];
+  if (options.nodePath) env.push(`NODE_PATH=${shellQuote(options.nodePath, platform)}`);
+  env.push(`FLOWLENS_RUN_OUTPUT=${runPath}`);
+  return `cd ${suite} && ${env.join(' ')} npx playwright test ${spec}${configArg} --reporter=${reporter} --output=${output}`;
 }
 
 function interpolateToken(entry, prompt) {
@@ -192,6 +233,9 @@ export function buildAgentInvocation(agent = {}, prompt = '') {
     typeof agent.command === 'string' && agent.command ? agent.command : DEFAULT_AGENT.command;
   const template = agent.argsTemplate;
   if (typeof template === 'string' && template) {
+    if (process.platform === 'win32') {
+      throw new Error('string argsTemplate is not supported on Windows; use an array argsTemplate');
+    }
     const argsPart = template.replace(PROMPT_TOKEN, () => shellQuote(prompt));
     const shellCommand = `${shellQuote(command)} ${argsPart}`;
     return { command: 'sh', args: ['-c', shellCommand], shell: false, shellCommand };
@@ -228,14 +272,19 @@ function agentCommandExists(command) {
     }
   }
   const dirs = String(process.env.PATH ?? '').split(path.delimiter);
+  const exts = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
   return dirs.some((dir) => {
     if (!dir) return false;
-    try {
-      fs.accessSync(path.join(dir, command), fs.constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
+    return exts.some((ext) => {
+      try {
+        fs.accessSync(path.join(dir, command + ext), fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
   });
 }
 

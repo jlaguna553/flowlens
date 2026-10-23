@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { build } from './build.mjs';
 import { validateFlows } from './mcp.mjs';
+import { ensureOpencodeModel } from './models.mjs';
 import {
   DEFAULT_AGENT,
   resolveAgentProject,
@@ -163,6 +164,22 @@ export async function mapProject(options = {}) {
   if (options.agent && typeof options.agent === 'object') agent = options.agent;
   else if (configured) agent = project.agent;
   else agent = resolveAgentForEnvironment(options.env);
+  if (!options.dryRun && agent.command === 'opencode' && options.modelCheck !== false) {
+    const ensured = await ensureOpencodeModel({
+      agent,
+      configPath: project.configPath,
+      cwd: project.suite,
+      preferred: options.model,
+      timeoutMs: options.modelTimeoutMs,
+      onLog: options.onLog,
+    });
+    if (!ensured.model) {
+      throw new Error(
+        'no reachable opencode model found; sign in to a provider, pass --model <provider/model>, or set FLOWLENS_MODEL'
+      );
+    }
+    agent = ensured.agent;
+  }
   const flowsPath = path.resolve(project.configDir, project.config.flows ?? 'flows.json');
   const currentFlows = readJsonSafe(flowsPath);
   const flowsBefore = Array.isArray(currentFlows && currentFlows.flows) ? currentFlows.flows.length : 0;
@@ -188,6 +205,7 @@ export async function mapProject(options = {}) {
     agent: {
       command: agent.command,
       argsTemplate: agent.argsTemplate,
+      model: agent.model ?? null,
       source: agent.source ?? 'config',
     },
     flowsBefore,
