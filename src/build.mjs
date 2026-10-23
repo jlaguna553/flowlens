@@ -652,8 +652,8 @@ function resolvedResults(test, artifacts) {
   }));
 }
 
-function resolveFlowTest(flow, spec, index, artifacts, mappedNodes, traceState, links, labels) {
-  const resolved = index.get(`${spec.spec}\u0000${spec.title}`) ?? null;
+function resolveFlowTest(flow, spec, findTest, artifacts, mappedNodes, traceState, links, labels) {
+  const resolved = findTest(spec.spec, spec.title);
   if (!resolved) {
     return {
       spec: spec.spec,
@@ -787,12 +787,56 @@ export function build(options = {}) {
     },
   };
 
-  const index = new Map();
+  const specPathKey = (value) => {
+    const normalized = String(value ?? '').replace(/\\/g, '/');
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  };
+  const testIndex = new Map();
+  const basenameIndex = new Map();
   for (const test of resolved.tests ?? []) {
-    index.set(`${test.file}\u0000${test.title}`, test);
+    if (!test.file) continue;
+    const absoluteFile = path.isAbsolute(test.file)
+      ? test.file
+      : path.resolve(config.suite, test.file);
+    const title = test.title ?? '';
+    const keys = [
+      `${specPathKey(absoluteFile)}\u0000${title}`,
+      `${specPathKey(path.relative(config.suite, absoluteFile))}\u0000${title}`,
+      `${specPathKey(path.relative(specDir, absoluteFile))}\u0000${title}`,
+    ];
+    for (const key of keys) {
+      if (!testIndex.has(key)) testIndex.set(key, test);
+    }
+    const basenameKey = `${specPathKey(path.basename(absoluteFile))}\u0000${title}`;
+    if (basenameIndex.has(basenameKey)) basenameIndex.set(basenameKey, null);
+    else basenameIndex.set(basenameKey, test);
   }
+  const findTest = (specPath, title) => {
+    const raw = String(specPath ?? '');
+    if (!raw) return null;
+    const candidates = [raw, path.resolve(specDir, raw), path.resolve(config.suite, raw)];
+    for (const candidate of candidates) {
+      const found = testIndex.get(`${specPathKey(candidate)}\u0000${title}`);
+      if (found) return found;
+    }
+    return basenameIndex.get(`${specPathKey(path.basename(raw))}\u0000${title}`) ?? null;
+  };
 
   const flowList = Array.isArray(flows.flows) ? flows.flows : [];
+  const coverageByFlow = new Map();
+  for (const flow of flowList) {
+    const specs = Array.isArray(flow.tests) ? flow.tests : [];
+    const outcomes = specs.map((spec) => findTest(spec.spec, spec.title)?.outcome ?? null);
+    const known = outcomes.filter(Boolean);
+    let coverage = flow.coverage ?? null;
+    if (known.length) {
+      const passed = known.filter((outcome) => outcome === 'expected').length;
+      if (passed === specs.length) coverage = 'covered';
+      else if (passed > 0) coverage = 'partial';
+      else if (known.length === specs.length) coverage = 'uncovered';
+    }
+    coverageByFlow.set(flow.id, coverage);
+  }
   const nodes = [];
   const links = [];
   const nodeByKey = new Map();
@@ -866,7 +910,7 @@ export function build(options = {}) {
           flows: flowId ? [flowId] : [],
           flowNames: flowId ? [flowTitle] : [],
           module: node.module ?? null,
-          coverage: flow.coverage ?? null,
+          coverage: coverageByFlow.get(flowId) ?? flow.coverage ?? null,
           response: node.response ?? null,
           file: canonical.file,
           line: canonical.line,
@@ -884,7 +928,7 @@ export function build(options = {}) {
           target.flows.push(flowId);
           target.flowNames.push(flowTitle);
         }
-        target.coverage = mergeCoverage(target.coverage, flow.coverage);
+        target.coverage = mergeCoverage(target.coverage, coverageByFlow.get(flowId) ?? flow.coverage);
         if (!target.payload && node.payload) target.payload = node.payload;
         if (!target.response && node.response) target.response = node.response;
         if (!target.label && canonical.label) target.label = canonical.label;
@@ -960,13 +1004,13 @@ export function build(options = {}) {
     return {
       id: flow.id ?? null,
       title: flow.title ?? null,
-      coverage: flow.coverage ?? null,
+      coverage: coverageByFlow.get(flow.id) ?? flow.coverage ?? null,
       actors: Array.isArray(flow.actors) ? flow.actors.slice() : [],
       notes: flow.notes ?? null,
       start: flow.start ?? null,
       mermaid: typeof flow.mermaid === 'string' ? flow.mermaid : null,
       tests: (Array.isArray(flow.tests) ? flow.tests : []).map((spec) =>
-        resolveFlowTest(testFlow, spec, index, artifacts, mappedNodes, traceState, traceLinks, labels)
+        resolveFlowTest(testFlow, spec, findTest, artifacts, mappedNodes, traceState, traceLinks, labels)
       ),
     };
   });
